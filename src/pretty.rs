@@ -1,4 +1,4 @@
-use crate::{trpc::get_all_problems, Parameters};
+use crate::{client::HttpError, trpc::get_all_problems, Parameters};
 use colored::*;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -1132,6 +1132,94 @@ pub fn print_auth_error() {
     );
     println!("{}", style("https://tensara.org/cli").yellow());
     println!("{}", style("═".repeat(60)).dim());
+}
+
+pub fn print_request_error(error_message: &str) {
+    println!("\n{}", style("⚠️ REQUEST FAILED ⚠️").red().bold());
+    println!("{}", style("═".repeat(60)).dim());
+    println!(
+        "{}: {}",
+        style("Reason").red().bold(),
+        style(error_message).yellow()
+    );
+    println!(
+        "{}",
+        style("Check your network connection and Tensara API base URL.")
+            .yellow()
+            .bold()
+    );
+    println!("{}", style("═".repeat(60)).dim());
+}
+
+pub fn print_http_error(error: &HttpError) {
+    println!("\n{}", style("⚠️ SERVER ERROR ⚠️").red().bold());
+    println!("{}", style("═".repeat(72)).dim());
+    println!(
+        "{}: {}",
+        style("Status").red().bold(),
+        style(&error.status_text).yellow()
+    );
+    println!(
+        "{}: {}",
+        style("Endpoint").cyan().bold(),
+        style(&error.endpoint).dim()
+    );
+
+    if let Some(content_type) = &error.content_type {
+        println!(
+            "{}: {}",
+            style("Content-Type").cyan().bold(),
+            style(content_type).dim()
+        );
+    }
+
+    let summary = error
+        .error
+        .as_deref()
+        .or(error.message.as_deref())
+        .unwrap_or("Request failed");
+    println!(
+        "{}: {}",
+        style("Message").yellow().bold(),
+        style(summary).red()
+    );
+
+    if let Some(details) = error.details.as_deref() {
+        println!("\n{}", style("Details:").yellow().bold());
+        println!("{}", details);
+    } else if !error.raw_body.trim().is_empty()
+        && error.raw_body.trim() != "null"
+        && error.raw_body.trim() != "{}"
+    {
+        println!("\n{}", style("Response Body:").yellow().bold());
+        println!("{}", error.raw_body.trim());
+    }
+
+    match error.status_code {
+        404 => println!(
+            "\n{}",
+            style(
+                "The Tensara endpoint was not found. Check that your CLI is pointing at the right backend."
+            )
+            .yellow()
+            .bold()
+        ),
+        429 => println!(
+            "\n{}",
+            style("Rate limit exceeded. Wait a bit before retrying.")
+                .yellow()
+                .bold()
+        ),
+        500..=599 => println!(
+            "\n{}",
+            style("The Tensara backend failed while handling your request.")
+                .yellow()
+                .bold()
+        ),
+        _ => {}
+    }
+
+    println!("{}", style("═".repeat(72)).dim());
 }
 
 fn extract_value_from_error(error_message: &str) -> Option<String> {

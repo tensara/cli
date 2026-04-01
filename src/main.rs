@@ -4,7 +4,7 @@ use std::path::Path;
 use std::{fs, process::exit};
 use tensara::{
     auth::AuthInfo,
-    client,
+    client::{self, ClientError},
     init::init,
     pretty::{self, pretty_print_problems},
     Parameters,
@@ -67,7 +67,7 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
         exit(1);
     }
 
-    let response = match command_type.as_str() {
+    let response = match match command_type.as_str() {
         "benchmark" => client::send_post_request_to_endpoint(
             &benchmark_endpoint,
             problem_slug,
@@ -96,6 +96,20 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
             auth_info,
         ),
         _ => unreachable!("Invalid command type for problem execution"),
+    } {
+        Ok(response) => response,
+        Err(ClientError::Http(error)) => {
+            if error.status_code == 401 {
+                pretty::print_auth_error();
+            } else {
+                pretty::print_http_error(&error);
+            }
+            exit(1);
+        }
+        Err(ClientError::RequestFailed(error)) => {
+            pretty::print_request_error(&error);
+            exit(1);
+        }
     };
 
     match command_type.as_str() {
