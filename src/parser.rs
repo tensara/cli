@@ -1,7 +1,7 @@
-use clap::{builder::TypedValueParser, command, Arg, ArgMatches, Command};
+use crate::problems::is_valid_problem_slug;
+use clap::{builder::TypedValueParser, command, Arg, ArgAction, ArgMatches, Command};
 use std::ffi::OsStr;
 use std::path::Path;
-use crate::problems::is_valid_problem_slug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GPU {
@@ -36,7 +36,7 @@ impl std::fmt::Display for GPU {
 }
 
 impl TypedValueParser for ProblemNameParser {
-    type Value = String;   
+    type Value = String;
 
     fn parse_ref(
         &self,
@@ -115,7 +115,7 @@ impl TypedValueParser for SolutionFile {
                     clap::error::ErrorKind::InvalidValue,
                     format!("SOLUTION_FILE: {}", path_str),
                 ));
-            } 
+            }
         } else {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
@@ -163,7 +163,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Relative path to the solution file")
                             .value_parser(SolutionFile)
                             .required(true),
-                    )                    
+                    )
             )
             .subcommand(
                 Command::new("checker")
@@ -195,7 +195,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Relative path to the solution file")
                             .value_parser(SolutionFile)
                             .required(true),
-                    )                    
+                    )
             )
             .subcommand(
                 Command::new("benchmark")
@@ -251,6 +251,31 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                     )
             )
             .subcommand(
+                Command::new("problem")
+                    .about("Show details for a single problem")
+                    .arg_required_else_help(true)
+                    .arg(
+                        Arg::new("problem_name")
+                            .value_name("PROBLEM_NAME")
+                            .help("Name of the problem to inspect")
+                            .required(true)
+                            .index(1)
+                            .value_parser(ProblemNameParser),
+                    )
+                    .arg(
+                        Arg::new("description_only")
+                            .long("description-only")
+                            .help("Only print the problem description")
+                            .action(ArgAction::SetTrue),
+                    )
+                    .arg(
+                        Arg::new("reference_only")
+                            .long("reference-only")
+                            .help("Only print the PyTorch reference solution")
+                            .action(ArgAction::SetTrue),
+                    ),
+            )
+            .subcommand(
                 Command::new("auth")
                     .about("Authenticate with the Tensara API to submit solutions")
                     .arg(
@@ -270,7 +295,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Directory where you want to initialize the file")
                             .value_name("DIRECTORY")
                             .required(false)
-                            .index(1)  
+                            .index(1)
                     )
                     .arg(
                         Arg::new("problem_name")
@@ -278,7 +303,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .long("problem")
                             .value_name("PROBLEM_NAME")
                             .help("Name of the problem to test")
-                            .required_unless_present("all") 
+                            .required_unless_present("all")
                             .value_parser(ProblemNameParser),
                     )
                     .arg(
@@ -296,7 +321,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Initialize all problems")
                             .action(clap::ArgAction::SetTrue),
                     )
-                
+
             );
 
     if let Some(args) = args {
@@ -330,6 +355,10 @@ pub fn get_auth_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("auth").unwrap()
 }
 
+pub fn get_problem_matches(matches: &ArgMatches) -> &ArgMatches {
+    matches.subcommand_matches("problem").unwrap()
+}
+
 pub fn get_init_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("init").unwrap()
 }
@@ -345,5 +374,10 @@ pub fn get_language_type(matches: &ArgMatches) -> &String {
     matches.get_one::<String>("language").unwrap()
 }
 
+pub fn get_description_only_flag(matches: &ArgMatches) -> bool {
+    matches.get_flag("description_only")
+}
 
-
+pub fn get_reference_only_flag(matches: &ArgMatches) -> bool {
+    matches.get_flag("reference_only")
+}

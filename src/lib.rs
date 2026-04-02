@@ -12,6 +12,7 @@ pub enum CommandType {
     Benchmark,
     Submit,
     Problems,
+    Problem,
     Auth,
     Init,
     None,
@@ -33,6 +34,8 @@ pub struct Parameters {
     // Problems command fields
     fields: Option<Vec<String>>,
     sort_by: Option<String>,
+    description_only: bool,
+    reference_only: bool,
 
     // Auth command fields
     token: Option<String>,
@@ -81,6 +84,9 @@ impl Parameters {
             Some("problems") => {
                 Self::from_problems_matches(parser::get_problems_matches(&command_matches))
             }
+            Some("problem") => {
+                Self::from_problem_matches(parser::get_problem_matches(&command_matches))
+            }
             Some("auth") => Self::from_auth_matches(parser::get_auth_matches(&command_matches)),
             Some("init") => Self::from_init_matches(parser::get_init_matches(&command_matches)),
             _ => {
@@ -107,6 +113,27 @@ impl Parameters {
             gpu_type: None,
             fields,
             sort_by,
+            description_only: false,
+            reference_only: false,
+            token: None,
+            directory: None,
+            all_flag: false,
+        }
+    }
+
+    fn from_problem_matches(matches: &ArgMatches) -> Self {
+        Self {
+            command_type: CommandType::Problem,
+            command_name: "problem".to_string(),
+            problem_slug: Some(parser::get_problem_name(matches).to_string()),
+            code: None,
+            dtype: None,
+            language: None,
+            gpu_type: None,
+            fields: None,
+            sort_by: None,
+            description_only: parser::get_description_only_flag(matches),
+            reference_only: parser::get_reference_only_flag(matches),
             token: None,
             directory: None,
             all_flag: false,
@@ -126,6 +153,8 @@ impl Parameters {
             gpu_type: None,
             fields: None,
             sort_by: None,
+            description_only: false,
+            reference_only: false,
             token,
             directory: None,
             all_flag: false,
@@ -157,6 +186,8 @@ impl Parameters {
             gpu_type: None,
             fields: None,
             sort_by: None,
+            description_only: false,
+            reference_only: false,
             token: None,
             directory,
             all_flag,
@@ -188,6 +219,8 @@ impl Parameters {
             gpu_type: Some(gpu_type),
             fields: None,
             sort_by: None,
+            description_only: false,
+            reference_only: false,
             token: None,
             directory: None,
             all_flag: false,
@@ -251,6 +284,14 @@ impl Parameters {
         self.token.as_ref()
     }
 
+    pub fn get_description_only_flag(&self) -> bool {
+        self.description_only
+    }
+
+    pub fn get_reference_only_flag(&self) -> bool {
+        self.reference_only
+    }
+
     pub fn get_all_flag(&self) -> bool {
         self.all_flag
     }
@@ -264,6 +305,10 @@ impl Parameters {
 
     pub fn is_problems_listing(&self) -> bool {
         matches!(self.command_type, CommandType::Problems)
+    }
+
+    pub fn is_problem_details(&self) -> bool {
+        matches!(self.command_type, CommandType::Problem)
     }
 
     pub fn is_auth_command(&self) -> bool {

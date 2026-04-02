@@ -7,6 +7,7 @@ use tensara::{
     client::{self, ClientError},
     init::init,
     pretty::{self, pretty_print_problems},
+    trpc::get_problem_by_slug,
     Parameters,
 };
 
@@ -27,6 +28,9 @@ fn main() {
         }
         "problems" => {
             pretty_print_problems(&parameters);
+        }
+        "problem" => {
+            execute_problem_details_command(&parameters);
         }
         "auth" => {
             execute_auth_command(&parameters);
@@ -124,6 +128,16 @@ fn execute_auth_command(parameters: &Parameters) {
     let token = parameters.get_token();
     let auth_info = AuthInfo::new(token.unwrap().to_string(), "Tensara".to_string());
     auth_info.save();
+}
+
+fn execute_problem_details_command(parameters: &Parameters) {
+    let slug = parameters.get_problem_slug();
+    let problem = get_problem_by_slug(slug).unwrap_or_else(|_| {
+        eprintln!("Failed to fetch problem '{}'.", slug);
+        exit(1);
+    });
+
+    pretty::pretty_print_problem(&problem, parameters);
 }
 
 fn execute_init_command(parameters: &Parameters) {

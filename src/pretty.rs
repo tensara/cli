@@ -1,4 +1,8 @@
-use crate::{client::HttpError, trpc::get_all_problems, Parameters};
+use crate::{
+    client::HttpError,
+    trpc::{get_all_problems, ProblemDetails},
+    Parameters,
+};
 use colored::*;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -81,6 +85,108 @@ pub fn pretty_print_problems(parameters: &Parameters) {
         );
 
         println!("{} {} {} {}{}", slug, difficulty, author, tags, view_link);
+    }
+}
+
+fn extract_reference_solution(definition: &str) -> Option<String> {
+    let lines: Vec<&str> = definition.lines().collect();
+
+    for (start, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("def reference_solution(") {
+            continue;
+        }
+
+        let base_indent = line.len() - trimmed.len();
+        let mut end = start + 1;
+
+        while end < lines.len() {
+            let next = lines[end];
+            let next_trimmed = next.trim_start();
+            if next_trimmed.is_empty() {
+                end += 1;
+                continue;
+            }
+
+            let next_indent = next.len() - next_trimmed.len();
+            if next_indent <= base_indent && !next_trimmed.starts_with('@') {
+                break;
+            }
+            end += 1;
+        }
+
+        return Some(lines[start..end].join("\n"));
+    }
+
+    None
+}
+
+pub fn pretty_print_problem(problem: &ProblemDetails, parameters: &Parameters) {
+    let show_description = !parameters.get_reference_only_flag();
+    let show_reference = !parameters.get_description_only_flag();
+
+    println!("{}", style(&problem.title).green().bold());
+    println!("{}", style(&problem.slug).dim());
+
+    if let Some(difficulty) = &problem.difficulty {
+        println!("Difficulty: {}", difficulty);
+    }
+    if let Some(author) = &problem.author {
+        println!("Author: {}", author);
+    }
+    if let Some(tags) = &problem.tags {
+        if !tags.is_empty() {
+            println!("Tags: {}", tags.join(", "));
+        }
+    }
+
+    if show_description {
+        println!("\n{}", style("Description").bold().underlined());
+        match problem.description.as_deref() {
+            Some(description) if !description.trim().is_empty() => {
+                println!("{}", description.trim())
+            }
+            _ => println!("{}", style("No description available.").yellow()),
+        }
+    }
+
+    if !parameters.get_reference_only_flag() {
+        if let Some(problem_parameters) = &problem.parameters {
+            if !problem_parameters.is_empty() {
+                println!("\n{}", style("Parameters").bold().underlined());
+                for parameter in problem_parameters {
+                    let mut attrs = vec![parameter.ty.clone()];
+                    if parameter.pointer.as_deref() == Some("true") {
+                        attrs.push("pointer".to_string());
+                    }
+                    if parameter.constant.as_deref() == Some("true") {
+                        attrs.push("const".to_string());
+                    }
+                    println!(
+                        "{}: {}",
+                        style(&parameter.name).cyan().bold(),
+                        attrs.join(", ")
+                    );
+                }
+            }
+        }
+    }
+
+    if show_reference {
+        println!("\n{}", style("PyTorch Reference").bold().underlined());
+        match problem
+            .definition
+            .as_deref()
+            .and_then(extract_reference_solution)
+        {
+            Some(reference) => {
+                println!("{}", reference.trim());
+            }
+            None => println!(
+                "{}",
+                style("No reference_solution function found in the problem definition.").yellow()
+            ),
+        }
     }
 }
 
@@ -1255,6 +1361,11 @@ pub fn print_welcome_message() {
         "  • {} - {}",
         style("problems").green().bold(),
         "List all available problems"
+    );
+    println!(
+        "  • {} - {}",
+        style("problem").green().bold(),
+        "Show a problem description and PyTorch reference solution"
     );
     println!(
         "  • {} - {}",

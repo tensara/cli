@@ -14,7 +14,7 @@ pub fn generate_starter_code(
 ) -> String {
     let cpp_types = |dtype: &str| match dtype {
         "float32" => "float",
-        "float16" => "double", 
+        "float16" => "double",
         "int32" => "int",
         "int16" => "short",
         _ => "float",

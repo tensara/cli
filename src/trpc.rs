@@ -24,6 +24,7 @@ pub struct ProblemDetails {
     pub author: Option<String>,
     pub tags: Option<Vec<String>>,
     pub description: Option<String>,
+    pub definition: Option<String>,
     pub parameters: Option<Vec<ProblemParameter>>,
 }
 
