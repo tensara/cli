@@ -36,6 +36,7 @@ pub struct Parameters {
     sort_by: Option<String>,
     description_only: bool,
     reference_only: bool,
+    json_output: bool,
 
     // Auth command fields
     token: Option<String>,
@@ -115,6 +116,7 @@ impl Parameters {
             sort_by,
             description_only: false,
             reference_only: false,
+            json_output: parser::get_json_output_flag(matches),
             token: None,
             directory: None,
             all_flag: false,
@@ -134,6 +136,7 @@ impl Parameters {
             sort_by: None,
             description_only: parser::get_description_only_flag(matches),
             reference_only: parser::get_reference_only_flag(matches),
+            json_output: parser::get_json_output_flag(matches),
             token: None,
             directory: None,
             all_flag: false,
@@ -155,6 +158,7 @@ impl Parameters {
             sort_by: None,
             description_only: false,
             reference_only: false,
+            json_output: false,
             token,
             directory: None,
             all_flag: false,
@@ -188,6 +192,7 @@ impl Parameters {
             sort_by: None,
             description_only: false,
             reference_only: false,
+            json_output: false,
             token: None,
             directory,
             all_flag,
@@ -221,6 +226,7 @@ impl Parameters {
             sort_by: None,
             description_only: false,
             reference_only: false,
+            json_output: false,
             token: None,
             directory: None,
             all_flag: false,
@@ -290,6 +296,10 @@ impl Parameters {
 
     pub fn get_reference_only_flag(&self) -> bool {
         self.reference_only
+    }
+
+    pub fn get_json_output_flag(&self) -> bool {
+        self.json_output
     }
 
     pub fn get_all_flag(&self) -> bool {

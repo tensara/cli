@@ -14,17 +14,25 @@ use std::thread;
 use std::time::Duration;
 
 pub fn pretty_print_problems(parameters: &Parameters) {
+    let mut problems = get_all_problems().unwrap_or_else(|_| {
+        eprintln!("Failed to fetch problems.");
+        std::process::exit(1);
+    });
+
+    if parameters.get_json_output_flag() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&problems).expect("Failed to serialize problems")
+        );
+        return;
+    }
+
     println!("Fetching problems...");
     let fields = parameters
         .get_fields()
         .cloned()
         .unwrap_or_else(|| vec!["slug".to_string(), "title".to_string()]);
     let sort_by = parameters.get_sort_by().cloned();
-
-    let mut problems = get_all_problems().unwrap_or_else(|_| {
-        eprintln!("Failed to fetch problems.");
-        std::process::exit(1);
-    });
 
     if let Some(sort_field) = sort_by {
         match sort_field.as_str() {
@@ -121,7 +129,34 @@ fn extract_reference_solution(definition: &str) -> Option<String> {
     None
 }
 
+fn problem_json(problem: &ProblemDetails) -> Value {
+    let mut value = serde_json::to_value(problem).expect("Failed to serialize problem");
+
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "reference_solution".to_string(),
+            problem
+                .definition
+                .as_deref()
+                .and_then(extract_reference_solution)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+    }
+
+    value
+}
+
 pub fn pretty_print_problem(problem: &ProblemDetails, parameters: &Parameters) {
+    if parameters.get_json_output_flag() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&problem_json(problem))
+                .expect("Failed to serialize problem")
+        );
+        return;
+    }
+
     let show_description = !parameters.get_reference_only_flag();
     let show_reference = !parameters.get_description_only_flag();
 

@@ -249,6 +249,12 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Field to sort by: slug, title, difficulty, author")
                             .required(false),
                     )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    )
             )
             .subcommand(
                 Command::new("problem")
@@ -272,6 +278,12 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                         Arg::new("reference_only")
                             .long("reference-only")
                             .help("Only print the PyTorch reference solution")
+                            .action(ArgAction::SetTrue),
+                    )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
                             .action(ArgAction::SetTrue),
                     ),
             )
@@ -380,4 +392,8 @@ pub fn get_description_only_flag(matches: &ArgMatches) -> bool {
 
 pub fn get_reference_only_flag(matches: &ArgMatches) -> bool {
     matches.get_flag("reference_only")
+}
+
+pub fn get_json_output_flag(matches: &ArgMatches) -> bool {
+    matches.get_flag("json_output")
 }

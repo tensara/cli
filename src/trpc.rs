@@ -15,7 +15,7 @@ pub struct Problem {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ProblemDetails {
     pub id: String,
     pub slug: String,
@@ -28,7 +28,7 @@ pub struct ProblemDetails {
     pub parameters: Option<Vec<ProblemParameter>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ProblemParameter {
     pub name: String,
     #[serde(rename = "type")]
