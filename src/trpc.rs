@@ -1,7 +1,10 @@
 /*
 * Use these functions to call the tRPC endpoints from the Tensara API.
 */
-use crate::auth::AuthInfo;
+use crate::{
+    api::{api_base_url, api_url},
+    auth::AuthInfo,
+};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
@@ -81,7 +84,7 @@ struct TrpcJson<T> {
 */
 pub fn get_all_problems() -> Result<Vec<Problem>, Box<dyn std::error::Error>> {
     let client = Client::new();
-    let url = "https://tensara.org/api/trpc/problems.getAll";
+    let url = api_url("/api/trpc/problems.getAll");
 
     let response = client.get(url).header("User-Agent", "tensara-cli").send()?;
 
@@ -96,7 +99,7 @@ pub fn call_trpc_user_stats(auth: &AuthInfo) {
     let session_cookie = format!("__Secure-next-auth.session-token={}", auth.access_token);
 
     let client = Client::new();
-    let url = "https://tensara.org/api/trpc/problems.getUserStats";
+    let url = api_url("/api/trpc/problems.getUserStats");
 
     let response = client
         .get(url)
@@ -117,7 +120,8 @@ pub fn get_problem_by_slug(slug: &str) -> Result<ProblemDetails, Box<dyn std::er
     let input_json = serde_json::json!({ "json": { "slug": slug } }).to_string();
     let encoded_input = urlencoding::encode(&input_json).into_owned();
     let url = format!(
-        "https://tensara.org/api/trpc/problems.getById?input={}",
+        "{}/api/trpc/problems.getById?input={}",
+        api_base_url(),
         encoded_input
     );
 

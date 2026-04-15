@@ -147,6 +147,35 @@ fn problem_json(problem: &ProblemDetails) -> Value {
     value
 }
 
+#[cfg(test)]
+mod tests {
+    use super::extract_reference_solution;
+
+    #[test]
+    fn extracts_reference_solution_method_only() {
+        let definition = r#"
+class VectorAddition:
+    def reference_solution(self, a, b):
+        c = a + b
+        return c
+
+    def verify_result(self, expected, actual):
+        return True, {}
+"#;
+
+        let reference = extract_reference_solution(definition).unwrap();
+
+        assert!(reference.contains("def reference_solution"));
+        assert!(reference.contains("return c"));
+        assert!(!reference.contains("def verify_result"));
+    }
+
+    #[test]
+    fn returns_none_when_reference_solution_is_missing() {
+        assert!(extract_reference_solution("class Problem:\n    pass").is_none());
+    }
+}
+
 pub fn pretty_print_problem(problem: &ProblemDetails, parameters: &Parameters) {
     if parameters.get_json_output_flag() {
         println!(
@@ -223,6 +252,98 @@ pub fn pretty_print_problem(problem: &ProblemDetails, parameters: &Parameters) {
             ),
         }
     }
+}
+
+fn print_json_section(label: &str, value: Option<&Value>) {
+    if let Some(value) = value {
+        println!("\n{}", style(label).bold().underlined());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+        );
+    }
+}
+
+pub fn pretty_print_sample_response(response: impl Read) {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(default_spinner_style());
+    spinner.set_message("Running sample...");
+    spinner.enable_steady_tick(Duration::from_millis(80));
+
+    let reader = BufReader::new(response);
+
+    for line in reader.lines().flatten() {
+        spinner.tick();
+
+        if !line.starts_with("data: ") {
+            continue;
+        }
+
+        let json_data = &line[6..];
+        let Ok(json) = serde_json::from_str::<Value>(json_data) else {
+            continue;
+        };
+
+        match json.get("status").and_then(|s| s.as_str()) {
+            Some("PASSED") => {
+                spinner.finish_and_clear();
+                println!("{}", style("✅ Sample Passed").green().bold());
+                print_json_section("Input", json.get("input"));
+                print_json_section("Expected Output", json.get("expected_output"));
+                print_json_section("Actual Output", json.get("output"));
+                if let Some(stdout) = json.get("stdout").and_then(|v| v.as_str()) {
+                    if !stdout.trim().is_empty() {
+                        println!("\n{}", style("Stdout").bold().underlined());
+                        println!("{}", stdout.trim());
+                    }
+                }
+                if let Some(stderr) = json.get("stderr").and_then(|v| v.as_str()) {
+                    if !stderr.trim().is_empty() {
+                        println!("\n{}", style("Stderr").bold().underlined());
+                        println!("{}", style(stderr.trim()).yellow());
+                    }
+                }
+                return;
+            }
+            Some("FAILED") => {
+                spinner.finish_and_clear();
+                println!("{}", style("❌ Sample Failed").red().bold());
+                print_json_section("Input", json.get("input"));
+                print_json_section("Expected Output", json.get("expected_output"));
+                print_json_section("Actual Output", json.get("output"));
+                print_json_section("Debug Info", json.get("debug_info"));
+                return;
+            }
+            Some("COMPILE_ERROR") | Some("RUNTIME_ERROR") | Some("ERROR") => {
+                spinner.finish_and_clear();
+                let status = json
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("ERROR");
+                let message = json
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .or_else(|| json.get("error").and_then(|m| m.as_str()))
+                    .unwrap_or("Sample run failed");
+                println!("{}: {}", style(status).red().bold(), message);
+                if let Some(details) = json.get("details").and_then(|d| d.as_str()) {
+                    println!("\n{}", style("Details").bold().underlined());
+                    println!("{}", details);
+                }
+                return;
+            }
+            Some(status) => {
+                spinner.set_message(status.to_string());
+            }
+            None => {}
+        }
+    }
+
+    spinner.finish_and_clear();
+    println!(
+        "{}",
+        style("Sample stream ended without a final result.").yellow()
+    );
 }
 
 pub fn pretty_print_checker_streaming_response(mut response: impl Read) {

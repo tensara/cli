@@ -230,6 +230,38 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                     )
             )
             .subcommand(
+                Command::new("sample")
+                    .about("Run your solution against the problem sample case")
+                    .arg_required_else_help(true)
+                    .arg(
+                        Arg::new("gpu_type")
+                            .short('g')
+                            .value_name("GPU_TYPE")
+                            .help("Type of the GPU to use")
+                            .default_value("T4")
+                            .required(false)
+                            .value_parser(GPUParser),
+                    )
+                    .arg(
+                        Arg::new("problem_name")
+                            .short('p')
+                            .long("problem")
+                            .value_name("PROBLEM_NAME")
+                            .value_parser(ProblemNameParser)
+                            .help("Name of the problem to test")
+                            .required(true),
+                    )
+                    .arg(
+                        Arg::new("solution_file")
+                            .short('s')
+                            .long("solution")
+                            .value_name("SOLUTION_FILE")
+                            .help("Relative path to the solution file")
+                            .value_parser(SolutionFile)
+                            .required(true),
+                    )
+            )
+            .subcommand(
                 Command::new("problems")
                     .about("List all problems")
                     .arg(
@@ -378,6 +410,11 @@ pub fn get_init_matches(matches: &ArgMatches) -> &ArgMatches {
 pub fn get_submit_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("submit").unwrap()
 }
+
+pub fn get_sample_matches(matches: &ArgMatches) -> &ArgMatches {
+    matches.subcommand_matches("sample").unwrap()
+}
+
 pub fn get_problems_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("problems").unwrap()
 }

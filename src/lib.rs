@@ -1,3 +1,4 @@
+pub mod api;
 pub mod auth;
 pub mod client;
 pub mod init;
@@ -11,6 +12,7 @@ pub enum CommandType {
     Checker,
     Benchmark,
     Submit,
+    Sample,
     Problems,
     Problem,
     Auth,
@@ -81,6 +83,11 @@ impl Parameters {
                 CommandType::Submit,
                 "submit",
                 parser::get_submit_matches(&command_matches),
+            ),
+            Some("sample") => Self::from_subcommand(
+                CommandType::Sample,
+                "sample",
+                parser::get_sample_matches(&command_matches),
             ),
             Some("problems") => {
                 Self::from_problems_matches(parser::get_problems_matches(&command_matches))
@@ -309,7 +316,10 @@ impl Parameters {
     pub fn is_problem_command(&self) -> bool {
         matches!(
             self.command_type,
-            CommandType::Checker | CommandType::Benchmark | CommandType::Submit
+            CommandType::Checker
+                | CommandType::Benchmark
+                | CommandType::Submit
+                | CommandType::Sample
         )
     }
 

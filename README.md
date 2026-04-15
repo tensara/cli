@@ -1,107 +1,139 @@
-# CLI for Tensara submissions (Beta)
+# Tensara CLI
 
-Currently in beta. Allow users to practice Tensara problems from th e comfort of their own IDE.
-For now, CLI submissions do not show up on the leaderboard. Actively working on this, expect updates in 2 weeks!
+Command-line tools for inspecting Tensara problems, running sample checks, checking correctness, benchmarking, and submitting GPU programming solutions.
 
 ## Install
-For Linux/Mac:
+
+Linux/macOS:
+
 ```bash
 curl -sSL https://get.tensara.org/install.sh | bash
 ```
 
-For Windows (untested):
-```bash
+Windows:
+
+```powershell
 iwr -useb https://get.tensara.org/install.sh | iex
 ```
 
-## Usage
+## Configuration
 
-Run:
-```bash
-tensara
-```
+The CLI defaults to the production API at `https://tensara.org`.
 
-or
-``` bash
-tensara --help
-```
-
-For running tests or benchmarking:
-```bash
-tensara (checker | benchmark) -g <gpu_type> --problem <problem_name> --solution <solution_file>
-```
-
-## Example
+For local development, set:
 
 ```bash
-tensara checker -g T4 --problem vector-addition --solution tests/sol.cu
+TENSARA_API_BASE_URL=http://localhost:3000
 ```
 
-Short forms for args are also supported:
+You can also override individual routes when debugging:
 
 ```bash
-tensara checker -g T4 -p vector-addition -s tests/sol.cu
+CHECKER_ENDPOINT=http://localhost:3000/api/submissions/checker
+BENCHMARK_ENDPOINT=http://localhost:3000/api/submissions/benchmark
+SUBMIT_ENDPOINT=http://localhost:3000/api/submissions/direct-submit
+SAMPLE_ENDPOINT=http://localhost:3000/api/submissions/sample
 ```
 
-Supports the same languages and GPUs as the Tensara engine.
+## Authentication
 
-## View Problems
+Authenticate with a Tensara API key:
 
-To view available problems, use:
+```bash
+tensara auth -t <token>
+```
+
+API keys are stored in `~/.tensara/auth.json`.
+
+## Problems
+
+List problems:
+
 ```bash
 tensara problems
 ```
 
-You can show different fields by using the `--fields` flag and sort by `--sort-by`:
+List problems as JSON:
+
 ```bash
-tensara problems --f tags --s difficulty
+tensara problems --json
 ```
 
-To see all available flags:
+Show one problem, including description and PyTorch reference:
+
 ```bash
-tensara problems --help
+tensara problem vector-addition
 ```
 
-## Authenticate
+Machine-readable problem details:
 
-Before submitting solutions, authenticate using your Tensara account:
 ```bash
-tensara auth -t <token>
-```
-For more details, visit [tensara.org/cli](https://tensara.org/cli).
-
-## Init 
-
-To initialize a new project, use:
-```bash
-tensara init <directory> -p <problem_name> -l <language>
-```
-This will create a template solution file and a problem file in the specified directory.
-
-
-## Submit a Solution
-
-To submit your solution on Tensara, use the `submit` command:
-```bash
-tensara submit -g <gpu_type> -p <problem_name> -s <solution_file>
+tensara problem vector-addition --json
 ```
 
-Example:
+Reference only:
+
+```bash
+tensara problem vector-addition --reference-only
+```
+
+## Run A Sample
+
+Run your solution against the problem sample case:
+
+```bash
+tensara sample -g T4 -p vector-addition -s solution.cu
+```
+
+The CLI prints the input, expected output, actual output, debug info on failure, and captured stdout/stderr when available.
+
+## Check And Benchmark
+
+Check correctness:
+
+```bash
+tensara checker -g T4 -p vector-addition -s solution.cu
+```
+
+Benchmark performance:
+
+```bash
+tensara benchmark -g T4 -p vector-addition -s solution.cu
+```
+
+## Submit
+
+Submit for official evaluation:
+
 ```bash
 tensara submit -g T4 -p vector-addition -s solution.cu
 ```
 
-Your results will be shown in the CLI. Submissions will be reflected on the Tensara dashboard.
+Supported solution file extensions are `.cu`, `.py`, and `.mojo`.
 
+## Init
 
+Generate starter files for a problem:
+
+```bash
+tensara init <directory> -p vector-addition -l cuda
+```
+
+## Error Handling
+
+The CLI reports HTTP errors before attempting to parse streaming responses. Common cases include:
+
+- `401`: missing or invalid authentication
+- `404`: endpoint/backend mismatch
+- `429`: rate limit exceeded
+- `5xx`: server-side failure
+
+If you see endpoint errors during local development, check `TENSARA_API_BASE_URL` and any per-route overrides.
 
 ## Uninstall
 
 Remove the binary:
+
 ```bash
 sudo rm /usr/local/bin/tensara
 ```
-
----
-
-This documentation will evolve as we expand support. For the latest updates, visit [tensara.org/cli](https://tensara.org/cli).
