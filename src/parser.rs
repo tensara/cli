@@ -196,6 +196,12 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .value_parser(SolutionFile)
                             .required(true),
                     )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    )
             )
             .subcommand(
                 Command::new("benchmark")
@@ -227,6 +233,12 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Relative path to the solution file")
                             .value_parser(SolutionFile)
                             .required(true)
+                    )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
                     )
             )
             .subcommand(
@@ -432,5 +444,10 @@ pub fn get_reference_only_flag(matches: &ArgMatches) -> bool {
 }
 
 pub fn get_json_output_flag(matches: &ArgMatches) -> bool {
-    matches.get_flag("json_output")
+    matches
+        .try_get_one::<bool>("json_output")
+        .ok()
+        .flatten()
+        .copied()
+        .unwrap_or(false)
 }

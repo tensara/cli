@@ -233,7 +233,7 @@ impl Parameters {
             sort_by: None,
             description_only: false,
             reference_only: false,
-            json_output: false,
+            json_output: parser::get_json_output_flag(matches),
             token: None,
             directory: None,
             all_flag: false,

@@ -131,8 +131,8 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
     };
 
     match command_type.as_str() {
-        "benchmark" => pretty::pretty_print_benchmark_response(response),
-        "checker" => pretty::pretty_print_checker_streaming_response(response),
+        "benchmark" => pretty::pretty_print_benchmark_response_v2(response, parameters),
+        "checker" => pretty::pretty_print_checker_response(response, parameters),
         "submit" => pretty::pretty_print_submit_response(response),
         "sample" => pretty::pretty_print_sample_response(response),
         _ => unreachable!("Invalid command type for problem execution"),
@@ -147,8 +147,8 @@ fn execute_auth_command(parameters: &Parameters) {
 
 fn execute_problem_details_command(parameters: &Parameters) {
     let slug = parameters.get_problem_slug();
-    let problem = get_problem_by_slug(slug).unwrap_or_else(|_| {
-        eprintln!("Failed to fetch problem '{}'.", slug);
+    let problem = get_problem_by_slug(slug).unwrap_or_else(|error| {
+        eprintln!("Failed to fetch problem '{}': {}", slug, error);
         exit(1);
     });
 
@@ -188,7 +188,10 @@ fn execute_init_command(parameters: &Parameters) {
     let dir = parameters.get_directory();
     let slug = parameters.get_problem_slug();
     let path = Path::new(dir);
-    init(path, language, slug).unwrap();
+    if let Err(error) = init(path, language, slug) {
+        eprintln!("Failed to initialize problem '{}': {}", slug, error);
+        exit(1);
+    }
 }
 
 #[cfg(test)]

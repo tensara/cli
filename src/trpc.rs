@@ -6,7 +6,19 @@ use crate::{
     auth::AuthInfo,
 };
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{error::Error, fmt};
+
+#[derive(Debug)]
+struct TrpcFetchError(String);
+
+impl fmt::Display for TrpcFetchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Error for TrpcFetchError {}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Problem {
@@ -79,6 +91,61 @@ struct TrpcJson<T> {
     json: T,
 }
 
+fn truncate_body(body: &str) -> String {
+    const MAX_CHARS: usize = 500;
+    let trimmed = body.trim();
+
+    if trimmed.chars().count() <= MAX_CHARS {
+        return trimmed.to_string();
+    }
+
+    format!("{}...", trimmed.chars().take(MAX_CHARS).collect::<String>())
+}
+
+fn fetch_trpc_json<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, Box<dyn Error>> {
+    let response = client
+        .get(url)
+        .header("User-Agent", "tensara-cli")
+        .send()
+        .map_err(|error| {
+            TrpcFetchError(format!(
+                "failed to connect to Tensara API at {}: {}",
+                url, error
+            ))
+        })?;
+
+    let status = response.status();
+    let body = response.text().map_err(|error| {
+        TrpcFetchError(format!(
+            "failed to read Tensara API response from {}: {}",
+            url, error
+        ))
+    })?;
+
+    if !status.is_success() {
+        let body = truncate_body(&body);
+        let suffix = if body.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", body)
+        };
+
+        return Err(Box::new(TrpcFetchError(format!(
+            "Tensara API returned HTTP {} for {}{}",
+            status, url, suffix
+        ))));
+    }
+
+    serde_json::from_str(&body).map_err(|error| {
+        Box::new(TrpcFetchError(format!(
+            "failed to parse Tensara API JSON from {}: {}. Response body: {}",
+            url,
+            error,
+            truncate_body(&body)
+        ))) as Box<dyn Error>
+    })
+}
+
 /*
 * Use this function to get all problems
 */
@@ -86,9 +153,7 @@ pub fn get_all_problems() -> Result<Vec<Problem>, Box<dyn std::error::Error>> {
     let client = Client::new();
     let url = api_url("/api/trpc/problems.getAll");
 
-    let response = client.get(url).header("User-Agent", "tensara-cli").send()?;
-
-    let parsed: TrpcResult<Vec<Problem>> = response.json()?;
+    let parsed: TrpcResult<Vec<Problem>> = fetch_trpc_json(&client, &url)?;
     Ok(parsed.result.data.json)
 }
 
@@ -125,11 +190,6 @@ pub fn get_problem_by_slug(slug: &str) -> Result<ProblemDetails, Box<dyn std::er
         encoded_input
     );
 
-    let response = client
-        .get(&url)
-        .header("User-Agent", "tensara-cli")
-        .send()?;
-
-    let parsed: TrpcResult<ProblemDetails> = response.json()?;
+    let parsed: TrpcResult<ProblemDetails> = fetch_trpc_json(&client, &url)?;
     Ok(parsed.result.data.json)
 }

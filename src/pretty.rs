@@ -314,7 +314,15 @@ pub fn pretty_print_sample_response(response: impl Read) {
                 print_json_section("Debug Info", json.get("debug_info"));
                 return;
             }
-            Some("COMPILE_ERROR") | Some("RUNTIME_ERROR") | Some("ERROR") => {
+            Some("COMPILE_ERROR")
+            | Some("RUNTIME_ERROR")
+            | Some("TIME_LIMIT_EXCEEDED")
+            | Some("TOO_MANY_REQUESTS")
+            | Some("RATE_LIMIT_EXCEEDED")
+            | Some("SANDBOX_TIMEOUT")
+            | Some("SANDBOX_OUTPUT_LIMIT")
+            | Some("OUTPUT_LIMIT_EXCEEDED")
+            | Some("ERROR") => {
                 spinner.finish_and_clear();
                 let status = json
                     .get("status")
@@ -344,6 +352,352 @@ pub fn pretty_print_sample_response(response: impl Read) {
         "{}",
         style("Sample stream ended without a final result.").yellow()
     );
+}
+
+fn read_sse_json_events(response: impl Read) -> Vec<Value> {
+    let reader = BufReader::new(response);
+    let mut events = Vec::new();
+
+    for line in reader.lines().flatten() {
+        let Some(json_data) = line.strip_prefix("data: ") else {
+            continue;
+        };
+
+        if let Ok(json) = serde_json::from_str::<Value>(json_data) {
+            events.push(json);
+        }
+    }
+
+    events
+}
+
+fn status_of(event: &Value) -> Option<&str> {
+    event.get("status").and_then(|status| status.as_str())
+}
+
+fn string_any<'a>(event: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| event.get(*key).and_then(|value| value.as_str()))
+}
+
+fn u64_any(event: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| event.get(*key).and_then(|value| value.as_u64()))
+}
+
+fn f64_any(event: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| event.get(*key).and_then(|value| value.as_f64()))
+}
+
+fn event_error_message(event: &Value) -> String {
+    string_any(event, &["error", "message"])
+        .unwrap_or("No error message returned by the server.")
+        .to_string()
+}
+
+fn print_error_event(event: &Value) {
+    let status = status_of(event).unwrap_or("ERROR");
+    println!(
+        "{}: {}",
+        style(status).red().bold(),
+        event_error_message(event)
+    );
+
+    if let Some(details) = string_any(event, &["details", "stderr", "traceback"]) {
+        if !details.trim().is_empty() {
+            println!("\n{}", style("Details").bold().underlined());
+            println!("{}", details.trim());
+        }
+    }
+}
+
+fn collected_results(events: &[Value], event_status: &str) -> Vec<Value> {
+    events
+        .iter()
+        .filter(|event| status_of(event) == Some(event_status))
+        .filter_map(|event| event.get("result").cloned())
+        .collect()
+}
+
+fn array_field_or_collected(
+    event: Option<&Value>,
+    field: &str,
+    collected: Vec<Value>,
+) -> Vec<Value> {
+    event
+        .and_then(|event| event.get(field))
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or(collected)
+}
+
+fn compact_benchmark_results(results: &[Value]) -> Vec<Value> {
+    results
+        .iter()
+        .map(|result| {
+            serde_json::json!({
+                "test_id": result.get("test_id").cloned().unwrap_or(Value::Null),
+                "name": result.get("name").cloned().unwrap_or(Value::Null),
+                "gflops": result.get("gflops").cloned().unwrap_or(Value::Null),
+                "runtime_ms": result.get("runtime_ms").cloned().unwrap_or(Value::Null),
+                "status": result.get("status").cloned().unwrap_or_else(|| Value::String("PASSED".to_string())),
+            })
+        })
+        .collect()
+}
+
+pub fn pretty_print_checker_response(response: impl Read, parameters: &Parameters) {
+    let events = read_sse_json_events(response);
+    let final_event = events.iter().rev().find(|event| {
+        matches!(
+            status_of(event),
+            Some(
+                "CHECKED"
+                    | "WRONG_ANSWER"
+                    | "COMPILE_ERROR"
+                    | "RUNTIME_ERROR"
+                    | "TIME_LIMIT_EXCEEDED"
+                    | "MEMORY_LIMIT_EXCEEDED"
+                    | "RATE_LIMIT_EXCEEDED"
+                    | "SANDBOX_TIMEOUT"
+                    | "SANDBOX_OUTPUT_LIMIT"
+                    | "OUTPUT_LIMIT_EXCEEDED"
+                    | "ERROR"
+            )
+        )
+    });
+    let test_results = array_field_or_collected(
+        final_event,
+        "test_results",
+        collected_results(&events, "TEST_RESULT"),
+    );
+    let passed_tests = final_event
+        .and_then(|event| u64_any(event, &["passed_tests", "passedTests"]))
+        .unwrap_or_else(|| {
+            test_results
+                .iter()
+                .filter(|result| status_of(result) == Some("PASSED"))
+                .count() as u64
+        });
+    let total_tests = final_event
+        .and_then(|event| u64_any(event, &["total_tests", "totalTests"]))
+        .unwrap_or(test_results.len() as u64);
+    let status = final_event
+        .and_then(status_of)
+        .unwrap_or(if events.is_empty() {
+            "NO_RESPONSE"
+        } else {
+            "INCOMPLETE"
+        });
+
+    if parameters.get_json_output_flag() {
+        let mut output = serde_json::json!({
+            "status": status,
+            "passed_tests": passed_tests,
+            "total_tests": total_tests,
+            "test_results": test_results,
+        });
+
+        if let Some(final_event) = final_event {
+            if let Some(debug_info) = final_event.get("debug_info") {
+                output["debug_info"] = debug_info.clone();
+            }
+            if let Some(message) = string_any(final_event, &["error", "message"]) {
+                output["message"] = Value::String(message.to_string());
+            }
+            if let Some(details) = final_event.get("details") {
+                output["details"] = details.clone();
+            }
+        }
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).expect("Failed to serialize checker output")
+        );
+        return;
+    }
+
+    match status {
+        "CHECKED" if passed_tests == total_tests => {
+            println!("{}", style("✅ CHECKER RESULT: PASSED").green().bold());
+            println!("Tests: {}/{} passed", passed_tests, total_tests);
+        }
+        "CHECKED" | "WRONG_ANSWER" => {
+            println!("{}", style("❌ CHECKER RESULT: FAILED").red().bold());
+            println!("Tests: {}/{} passed", passed_tests, total_tests);
+
+            if let Some(final_event) = final_event {
+                print_json_section("Debug Info", final_event.get("debug_info"));
+            }
+        }
+        "COMPILE_ERROR"
+        | "RUNTIME_ERROR"
+        | "TIME_LIMIT_EXCEEDED"
+        | "MEMORY_LIMIT_EXCEEDED"
+        | "RATE_LIMIT_EXCEEDED"
+        | "SANDBOX_TIMEOUT"
+        | "SANDBOX_OUTPUT_LIMIT"
+        | "OUTPUT_LIMIT_EXCEEDED"
+        | "ERROR" => {
+            if let Some(final_event) = final_event {
+                print_error_event(final_event);
+            }
+        }
+        "NO_RESPONSE" => println!("{}", style("Checker returned no response.").red().bold()),
+        _ => {
+            println!(
+                "{}",
+                style("Checker stream ended before a final result.").yellow()
+            );
+            println!("Tests observed: {}/{}", passed_tests, total_tests);
+        }
+    }
+
+    if !test_results.is_empty() {
+        println!("\n{}", style("Test Results").bold().underlined());
+        for (index, result) in test_results.iter().enumerate() {
+            let name = result
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Unnamed");
+            let result_status = status_of(result).unwrap_or("UNKNOWN");
+            let styled_status = if result_status == "PASSED" {
+                style(result_status).green().bold()
+            } else {
+                style(result_status).red().bold()
+            };
+            println!("{}. {} - {}", index + 1, name, styled_status);
+        }
+    }
+}
+
+pub fn pretty_print_benchmark_response_v2(response: impl Read, parameters: &Parameters) {
+    let events = read_sse_json_events(response);
+    let final_event = events.iter().rev().find(|event| {
+        matches!(
+            status_of(event),
+            Some(
+                "ACCEPTED"
+                    | "BENCHMARKED"
+                    | "WRONG_ANSWER"
+                    | "COMPILE_ERROR"
+                    | "RUNTIME_ERROR"
+                    | "TIME_LIMIT_EXCEEDED"
+                    | "MEMORY_LIMIT_EXCEEDED"
+                    | "RATE_LIMIT_EXCEEDED"
+                    | "SANDBOX_TIMEOUT"
+                    | "SANDBOX_OUTPUT_LIMIT"
+                    | "OUTPUT_LIMIT_EXCEEDED"
+                    | "ERROR"
+            )
+        ) || (event.get("avg_gflops").is_some() && event.get("avg_runtime_ms").is_some())
+    });
+    let benchmark_results = array_field_or_collected(
+        final_event,
+        "benchmark_results",
+        collected_results(&events, "BENCHMARK_RESULT"),
+    );
+    let avg_gflops = final_event.and_then(|event| f64_any(event, &["avg_gflops", "avgGflops"]));
+    let avg_runtime_ms =
+        final_event.and_then(|event| f64_any(event, &["avg_runtime_ms", "avgRuntimeMs"]));
+    let status = final_event
+        .and_then(status_of)
+        .unwrap_or(if final_event.is_some() {
+            "ACCEPTED"
+        } else if events.is_empty() {
+            "NO_RESPONSE"
+        } else {
+            "INCOMPLETE"
+        });
+
+    if parameters.get_json_output_flag() {
+        let compact_results = compact_benchmark_results(&benchmark_results);
+        let mut output = serde_json::json!({
+            "status": status,
+            "avg_gflops": avg_gflops,
+            "avg_runtime_ms": avg_runtime_ms,
+            "benchmark_results": compact_results,
+        });
+
+        if let Some(final_event) = final_event {
+            if let Some(message) = string_any(final_event, &["error", "message"]) {
+                output["message"] = Value::String(message.to_string());
+            }
+            if let Some(details) = final_event.get("details") {
+                output["details"] = details.clone();
+            }
+            if let Some(debug_info) = final_event.get("debug_info") {
+                output["debug_info"] = debug_info.clone();
+            }
+        }
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).expect("Failed to serialize benchmark output")
+        );
+        return;
+    }
+
+    match status {
+        "ACCEPTED" | "BENCHMARKED" => {
+            println!("{}", style("✅ BENCHMARK RESULT: ACCEPTED").green().bold());
+            if let Some(avg_runtime_ms) = avg_runtime_ms {
+                println!("Average runtime: {:.4} ms", avg_runtime_ms);
+            }
+            if let Some(avg_gflops) = avg_gflops {
+                println!("Average GFLOPS: {:.2}", avg_gflops);
+            }
+        }
+        "WRONG_ANSWER" => {
+            println!(
+                "{}",
+                style("❌ BENCHMARK RESULT: WRONG ANSWER").red().bold()
+            );
+            if let Some(final_event) = final_event {
+                print_json_section("Debug Info", final_event.get("debug_info"));
+            }
+        }
+        "COMPILE_ERROR"
+        | "RUNTIME_ERROR"
+        | "TIME_LIMIT_EXCEEDED"
+        | "MEMORY_LIMIT_EXCEEDED"
+        | "RATE_LIMIT_EXCEEDED"
+        | "SANDBOX_TIMEOUT"
+        | "SANDBOX_OUTPUT_LIMIT"
+        | "OUTPUT_LIMIT_EXCEEDED"
+        | "ERROR" => {
+            if let Some(final_event) = final_event {
+                print_error_event(final_event);
+            }
+        }
+        "NO_RESPONSE" => println!("{}", style("Benchmark returned no response.").red().bold()),
+        _ => println!(
+            "{}",
+            style("Benchmark stream ended before a final result.").yellow()
+        ),
+    }
+
+    if !benchmark_results.is_empty() {
+        println!("\n{}", style("Benchmark Results").bold().underlined());
+        println!(
+            "{:<30} {:>12} {:>16}",
+            style("Test Case").bold(),
+            style("GFLOPS").bold(),
+            style("Runtime (ms)").bold()
+        );
+        println!("{}", style("─".repeat(62)).dim());
+
+        for result in benchmark_results {
+            let name = result
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Unnamed");
+            let gflops = f64_any(&result, &["gflops"]).unwrap_or(0.0);
+            let runtime_ms = f64_any(&result, &["runtime_ms", "runtimeMs"]).unwrap_or(0.0);
+            println!("{:<30} {:>12.2} {:>16.4}", name, gflops, runtime_ms);
+        }
+    }
 }
 
 pub fn pretty_print_checker_streaming_response(mut response: impl Read) {
