@@ -272,6 +272,12 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .value_parser(SolutionFile)
                             .required(true),
                     )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    )
             )
             .subcommand(
                 Command::new("problems")

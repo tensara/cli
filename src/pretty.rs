@@ -264,16 +264,20 @@ fn print_json_section(label: &str, value: Option<&Value>) {
     }
 }
 
-pub fn pretty_print_sample_response(response: impl Read) {
+pub fn pretty_print_sample_response(response: impl Read, parameters: &Parameters) {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(default_spinner_style());
     spinner.set_message("Running sample...");
-    spinner.enable_steady_tick(Duration::from_millis(80));
+    if !parameters.get_json_output_flag() {
+        spinner.enable_steady_tick(Duration::from_millis(80));
+    }
 
     let reader = BufReader::new(response);
 
     for line in reader.lines().flatten() {
-        spinner.tick();
+        if !parameters.get_json_output_flag() {
+            spinner.tick();
+        }
 
         if !line.starts_with("data: ") {
             continue;
@@ -286,6 +290,14 @@ pub fn pretty_print_sample_response(response: impl Read) {
 
         match json.get("status").and_then(|s| s.as_str()) {
             Some("PASSED") => {
+                if parameters.get_json_output_flag() {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json)
+                            .expect("Failed to serialize sample output")
+                    );
+                    return;
+                }
                 spinner.finish_and_clear();
                 println!("{}", style("✅ Sample Passed").green().bold());
                 print_json_section("Input", json.get("input"));
@@ -306,6 +318,14 @@ pub fn pretty_print_sample_response(response: impl Read) {
                 return;
             }
             Some("FAILED") => {
+                if parameters.get_json_output_flag() {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json)
+                            .expect("Failed to serialize sample output")
+                    );
+                    return;
+                }
                 spinner.finish_and_clear();
                 println!("{}", style("❌ Sample Failed").red().bold());
                 print_json_section("Input", json.get("input"));
@@ -323,6 +343,14 @@ pub fn pretty_print_sample_response(response: impl Read) {
             | Some("SANDBOX_OUTPUT_LIMIT")
             | Some("OUTPUT_LIMIT_EXCEEDED")
             | Some("ERROR") => {
+                if parameters.get_json_output_flag() {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json)
+                            .expect("Failed to serialize sample output")
+                    );
+                    return;
+                }
                 spinner.finish_and_clear();
                 let status = json
                     .get("status")
@@ -347,11 +375,22 @@ pub fn pretty_print_sample_response(response: impl Read) {
         }
     }
 
-    spinner.finish_and_clear();
-    println!(
-        "{}",
-        style("Sample stream ended without a final result.").yellow()
-    );
+    if parameters.get_json_output_flag() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "status": "INCOMPLETE",
+                "message": "Sample stream ended without a final result."
+            }))
+            .expect("Failed to serialize sample output")
+        );
+    } else {
+        spinner.finish_and_clear();
+        println!(
+            "{}",
+            style("Sample stream ended without a final result.").yellow()
+        );
+    }
 }
 
 fn read_sse_json_events(response: impl Read) -> Vec<Value> {

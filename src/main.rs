@@ -134,7 +134,7 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
         "benchmark" => pretty::pretty_print_benchmark_response_v2(response, parameters),
         "checker" => pretty::pretty_print_checker_response(response, parameters),
         "submit" => pretty::pretty_print_submit_response(response),
-        "sample" => pretty::pretty_print_sample_response(response),
+        "sample" => pretty::pretty_print_sample_response(response, parameters),
         _ => unreachable!("Invalid command type for problem execution"),
     }
 }
