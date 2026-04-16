@@ -164,6 +164,16 @@ fn problem_json(problem: &ProblemDetails) -> Value {
                     "language": "mojo",
                     "code": generate_starter_code(parameters, "mojo", data_type),
                 },
+                "cute": {
+                    "filename": "sol.cute.py",
+                    "language": "cute",
+                    "code": generate_starter_code(parameters, "cute", data_type),
+                },
+                "cutile": {
+                    "filename": "sol.cutile.py",
+                    "language": "cutile",
+                    "code": generate_starter_code(parameters, "cutile", data_type),
+                },
             }),
         );
     }
@@ -247,6 +257,14 @@ class VectorAddition:
             .as_str()
             .unwrap()
             .contains("@export"));
+        assert!(starters["cute"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("@cute.jit"));
+        assert!(starters["cutile"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("import cuda.tile as ct"));
     }
 }
 
@@ -1801,11 +1819,14 @@ fn print_invalid_file_error() {
     println!("\n{}", style("Requirements:").green().bold());
     println!("{}", style("─".repeat(60)).dim());
     println!("  • File must exist");
-    println!("  • File must be either a .cu (CUDA) .py (Python) or .mojo (Mojo) file");
+    println!(
+        "  • File must be a .cu, .py, or .mojo file. Use --language cute or --language cutile for CuTe/cuTile Python files"
+    );
     println!("  • File must be readable");
 
     println!("\n{}", style("Example:").yellow().bright().bold());
     println!("  tensara checker -p relu -s ./my_solution.cu");
+    println!("  tensara checker -p relu -s ./my_solution.py --language cute");
 
     println!("{}", style("═".repeat(60)).dim());
 }

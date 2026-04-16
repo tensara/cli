@@ -35,6 +35,20 @@ pub fn generate_starter_code(
         _ => "int",
     };
 
+    let cute_types = |ty: &str| match ty {
+        "float" => "cute.Float32",
+        "double" => "cute.Float64",
+        "float16" => "cute.Float16",
+        "float8" => "cute.Float8E4M3",
+        "float4" => "cute.UInt8",
+        "int" => "cute.Int32",
+        "uint8_t" => "cute.UInt8",
+        "size_t" => "cute.Int64",
+        "uint32_t" => "cute.UInt32",
+        "uint64_t" => "cute.UInt64",
+        _ => "cute.Int32",
+    };
+
     let mojo_types = |ty: &str| match ty {
         "float" => "Float32".to_string(),
         "double" => "Float64".to_string(),
@@ -218,6 +232,68 @@ def solution({}) raises:
             param_str,
             pointer_setup
         )
+    } else if language == "cute" {
+        let names: Vec<_> = parameters
+            .iter()
+            .filter(|p| p.pointer.as_deref() == Some("true"))
+            .map(|p| p.name.clone())
+            .collect();
+
+        let param_str = parameters
+            .iter()
+            .map(|p| {
+                if p.pointer.as_deref() == Some("true") {
+                    format!("{}: cute.Tensor", p.name)
+                } else {
+                    format!("{}: {}", p.name, cute_types(&p.ty))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        format!(
+            "import cutlass
+import cutlass.cute as cute
+
+# Note: {} are device tensor parameters
+@cute.jit
+def solution({}):
+    ",
+            names.join(", "),
+            param_str
+        )
+    } else if language == "cutile" {
+        let names: Vec<_> = parameters
+            .iter()
+            .filter(|p| p.pointer.as_deref() == Some("true"))
+            .map(|p| p.name.clone())
+            .collect();
+
+        let param_str = parameters
+            .iter()
+            .map(|p| {
+                if p.pointer.as_deref() == Some("true") {
+                    p.name.clone()
+                } else if p.ty == "[VAR]" {
+                    format!("{}: {}", p.name, python_types(data_type))
+                } else {
+                    format!("{}: {}", p.name, python_misc_types(&p.ty))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        format!(
+            "import cuda.tile as ct
+import cupy
+
+# You can use cupy.cuda.get_current_stream() to get the current stream to launch cuTile kernels.
+# Note: {} are device tensor parameters
+def solution({}):
+    ",
+            names.join(", "),
+            param_str
+        )
     } else {
         "".to_string()
     }
@@ -247,6 +323,8 @@ pub fn generate_comment_block(description: &str, language: &str) -> String {
         "cuda" => "// ",
         "python" => "# ",
         "mojo" => "# ",
+        "cute" => "# ",
+        "cutile" => "# ",
         _ => "// ",
     };
 
@@ -306,6 +384,8 @@ pub fn init(
         "cuda" => "sol.cu",
         "python" => "sol.py",
         "mojo" => "sol.mojo",
+        "cute" => "sol.cute.py",
+        "cutile" => "sol.cutile.py",
         _ => "sol.txt",
     };
 

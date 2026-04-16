@@ -3,6 +3,8 @@ use clap::{builder::TypedValueParser, command, Arg, ArgAction, ArgMatches, Comma
 use std::ffi::OsStr;
 use std::path::Path;
 
+const SUPPORTED_LANGUAGES: [&str; 5] = ["cuda", "python", "mojo", "cute", "cutile"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GPU {
     T4,
@@ -164,6 +166,15 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .value_parser(SolutionFile)
                             .required(true),
                     )
+                    .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
+                    )
             )
             .subcommand(
                 Command::new("checker")
@@ -195,6 +206,15 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Relative path to the solution file")
                             .value_parser(SolutionFile)
                             .required(true),
+                    )
+                    .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
                     )
                     .arg(
                         Arg::new("json_output")
@@ -235,6 +255,15 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .required(true)
                     )
                     .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
+                    )
+                    .arg(
                         Arg::new("json_output")
                             .long("json")
                             .help("Print machine-readable JSON")
@@ -271,6 +300,15 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Relative path to the solution file")
                             .value_parser(SolutionFile)
                             .required(true),
+                    )
+                    .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
                     )
                     .arg(
                         Arg::new("json_output")
@@ -376,6 +414,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Solution file language")
                             .default_value("cuda")
                             .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES)
                     )
                     .arg(
                         Arg::new("all")

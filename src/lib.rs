@@ -212,12 +212,16 @@ impl Parameters {
         let dtype = "float32".to_string();
         let gpu_type = parser::get_gpu_type(matches).to_string();
         let solution_file_extension = solution_file.split('.').last().unwrap();
-        let language = match solution_file_extension {
+        let inferred_language = match solution_file_extension {
             "py" => "python".to_string(),
             "cu" => "cuda".to_string(),
             "mojo" => "mojo".to_string(),
             _ => "unknown".to_string(),
         };
+        let language = matches
+            .get_one::<String>("language")
+            .cloned()
+            .unwrap_or(inferred_language);
 
         let command_name = subcommand.to_string();
 
