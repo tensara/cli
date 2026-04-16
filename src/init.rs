@@ -35,19 +35,32 @@ pub fn generate_starter_code(
         _ => "int",
     };
 
-    let mojo_types = |dtype: &str| match dtype {
-        "float32" => "Float32",
-        "float16" => "Float16",
-        "int32" => "Int32",
-        "int16" => "Int16",
-        _ => "Float32",
+    let mojo_types = |ty: &str| match ty {
+        "float" => "Float32".to_string(),
+        "double" => "Float64".to_string(),
+        "float16" => "Float16".to_string(),
+        "float8" => "Float8_e4m3fn".to_string(),
+        "float4" => "UInt8".to_string(),
+        "int" => "Int32".to_string(),
+        "uint8_t" => "UInt8".to_string(),
+        "size_t" => "Int64".to_string(),
+        "uint32_t" => "UInt32".to_string(),
+        "uint64_t" => "UInt64".to_string(),
+        _ => ty.to_string(),
     };
 
-    let mojo_misc_types = |ty: &str| match ty {
-        "int" => "Int32",
-        "float" => "Float32",
-        "size_t" => "Int32",
-        _ => "Int32",
+    let mojo_dtype_const = |ty: &str| match ty {
+        "float" => "DType.float32",
+        "double" => "DType.float64",
+        "float16" => "DType.float16",
+        "float8" => "DType.float8_e4m3fn",
+        "float4" => "DType.uint8",
+        "int" => "DType.int32",
+        "uint8_t" => "DType.uint8",
+        "size_t" => "DType.int64",
+        "uint32_t" => "DType.uint32",
+        "uint64_t" => "DType.uint64",
+        _ => "DType.float32",
     };
 
     if language == "cuda" {
@@ -121,40 +134,91 @@ def solution({}):
             param_str
         )
     } else if language == "mojo" {
-        let names: Vec<_> = parameters
+        let pointer_params: Vec<_> = parameters
             .iter()
             .filter(|p| p.pointer.as_deref() == Some("true"))
-            .map(|p| p.name.clone())
             .collect();
+        let names: Vec<_> = pointer_params.iter().map(|p| p.name.clone()).collect();
+
+        let mut unique_ptr_types: Vec<String> = Vec::new();
+        for parameter in &pointer_params {
+            if !unique_ptr_types.contains(&parameter.ty) {
+                unique_ptr_types.push(parameter.ty.clone());
+            }
+        }
+
+        let dtype_var_for_type = |ty: &str| format!("dtype_{}", ty);
+        let dtype_block = unique_ptr_types
+            .iter()
+            .map(|ty| {
+                format!(
+                    "comptime {} = {}",
+                    dtype_var_for_type(ty),
+                    mojo_dtype_const(ty)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
 
         let param_str = parameters
             .iter()
             .map(|p| {
-                let type_str = if p.pointer.as_deref() == Some("true") {
-                    format!("UnsafePointer[{}]", mojo_types(data_type))
+                if p.pointer.as_deref() == Some("true") {
+                    format!("{}_addr: Int", p.name)
                 } else if p.ty == "[VAR]" {
-                    mojo_types(data_type).to_string()
+                    format!("{}: {}", p.name, mojo_types(data_type))
                 } else {
-                    mojo_misc_types(&p.ty).to_string()
-                };
-
-                format!("{}: {}", p.name, type_str)
+                    format!("{}: {}", p.name, mojo_types(&p.ty))
+                }
             })
             .collect::<Vec<_>>()
             .join(", ");
 
-        format!(
-            "from gpu.host import DeviceContext
-from gpu.id import block_dim, block_idx, thread_idx
-from memory import UnsafePointer
+        let ptr_type_comment = if unique_ptr_types.len() == 1 {
+            format!("{} arrays", unique_ptr_types[0])
+        } else {
+            "mixed-dtype arrays".to_string()
+        };
 
-# Note: {} are all device pointers to {} arrays
+        let pointer_setup = pointer_params
+            .iter()
+            .map(|p| {
+                let var_name = p.name.strip_prefix("d_").unwrap_or(&p.name);
+                let dtype_var = dtype_var_for_type(&p.ty);
+                format!(
+                    "    {} = UnsafePointer[Scalar[{}], MutExternalOrigin](unsafe_from_address={}_addr)",
+                    var_name, dtype_var, p.name
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let pointer_setup = if pointer_setup.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", pointer_setup)
+        };
+
+        let dtype_block = if dtype_block.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", dtype_block)
+        };
+
+        format!(
+            "from gpu import thread_idx, block_idx, block_dim
+from gpu.host import DeviceContext
+from memory import UnsafePointer 
+
+{}
+# Note: {} are device pointers to {}
 @export
-fn solution({}) raises:
-    ",
+def solution({}) raises:
+{}    ",
+            dtype_block,
             names.join(", "),
-            data_type,
-            param_str
+            ptr_type_comment,
+            param_str,
+            pointer_setup
         )
     } else {
         "".to_string()
@@ -258,4 +322,50 @@ pub fn init(
     println!("📁 Directory: {}", path.display());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_starter_code;
+    use crate::trpc::ProblemParameter;
+
+    #[test]
+    fn mojo_starter_uses_address_abi_and_dtype_constants() {
+        let parameters = vec![
+            ProblemParameter {
+                name: "d_input1".to_string(),
+                ty: "float".to_string(),
+                const_: Some("true".to_string()),
+                pointer: Some("true".to_string()),
+                constant: None,
+            },
+            ProblemParameter {
+                name: "d_output".to_string(),
+                ty: "float".to_string(),
+                const_: Some("false".to_string()),
+                pointer: Some("true".to_string()),
+                constant: None,
+            },
+            ProblemParameter {
+                name: "n".to_string(),
+                ty: "size_t".to_string(),
+                const_: Some("false".to_string()),
+                pointer: Some("false".to_string()),
+                constant: None,
+            },
+        ];
+
+        let starter = generate_starter_code(&parameters, "mojo", "float16");
+
+        assert!(starter.contains("comptime dtype_float = DType.float32"));
+        assert!(starter
+            .contains("def solution(d_input1_addr: Int, d_output_addr: Int, n: Int64) raises:"));
+        assert!(starter.contains(
+            "input1 = UnsafePointer[Scalar[dtype_float], MutExternalOrigin](unsafe_from_address=d_input1_addr)"
+        ));
+        assert!(starter.contains(
+            "output = UnsafePointer[Scalar[dtype_float], MutExternalOrigin](unsafe_from_address=d_output_addr)"
+        ));
+        assert!(!starter.contains("UnsafePointer[Float16]"));
+    }
 }
