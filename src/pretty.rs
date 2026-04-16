@@ -1,4 +1,9 @@
-use crate::{trpc::get_all_problems, Parameters};
+use crate::{
+    client::HttpError,
+    init::generate_starter_code,
+    trpc::{get_all_problems, ProblemDetails},
+    Parameters,
+};
 use colored::*;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -10,17 +15,25 @@ use std::thread;
 use std::time::Duration;
 
 pub fn pretty_print_problems(parameters: &Parameters) {
+    let mut problems = get_all_problems().unwrap_or_else(|_| {
+        eprintln!("Failed to fetch problems.");
+        std::process::exit(1);
+    });
+
+    if parameters.get_json_output_flag() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&problems).expect("Failed to serialize problems")
+        );
+        return;
+    }
+
     println!("Fetching problems...");
     let fields = parameters
         .get_fields()
         .cloned()
         .unwrap_or_else(|| vec!["slug".to_string(), "title".to_string()]);
     let sort_by = parameters.get_sort_by().cloned();
-
-    let mut problems = get_all_problems().unwrap_or_else(|_| {
-        eprintln!("Failed to fetch problems.");
-        std::process::exit(1);
-    });
 
     if let Some(sort_field) = sort_by {
         match sort_field.as_str() {
@@ -81,6 +94,740 @@ pub fn pretty_print_problems(parameters: &Parameters) {
         );
 
         println!("{} {} {} {}{}", slug, difficulty, author, tags, view_link);
+    }
+}
+
+fn extract_reference_solution(definition: &str) -> Option<String> {
+    let lines: Vec<&str> = definition.lines().collect();
+
+    for (start, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("def reference_solution(") {
+            continue;
+        }
+
+        let base_indent = line.len() - trimmed.len();
+        let mut end = start + 1;
+
+        while end < lines.len() {
+            let next = lines[end];
+            let next_trimmed = next.trim_start();
+            if next_trimmed.is_empty() {
+                end += 1;
+                continue;
+            }
+
+            let next_indent = next.len() - next_trimmed.len();
+            if next_indent <= base_indent && !next_trimmed.starts_with('@') {
+                break;
+            }
+            end += 1;
+        }
+
+        return Some(lines[start..end].join("\n"));
+    }
+
+    None
+}
+
+fn problem_json(problem: &ProblemDetails) -> Value {
+    let mut value = serde_json::to_value(problem).expect("Failed to serialize problem");
+
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "reference_solution".to_string(),
+            problem
+                .definition
+                .as_deref()
+                .and_then(extract_reference_solution)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+
+        let parameters = problem.parameters.as_deref().unwrap_or(&[]);
+        let data_type = "float16";
+        object.insert(
+            "starters".to_string(),
+            serde_json::json!({
+                "cuda": {
+                    "filename": "sol.cu",
+                    "language": "cuda",
+                    "code": generate_starter_code(parameters, "cuda", data_type),
+                },
+                "python": {
+                    "filename": "sol.py",
+                    "language": "python",
+                    "code": generate_starter_code(parameters, "python", data_type),
+                },
+                "mojo": {
+                    "filename": "sol.mojo",
+                    "language": "mojo",
+                    "code": generate_starter_code(parameters, "mojo", data_type),
+                },
+                "cute": {
+                    "filename": "sol.cute.py",
+                    "language": "cute",
+                    "code": generate_starter_code(parameters, "cute", data_type),
+                },
+                "cutile": {
+                    "filename": "sol.cutile.py",
+                    "language": "cutile",
+                    "code": generate_starter_code(parameters, "cutile", data_type),
+                },
+            }),
+        );
+    }
+
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_reference_solution, problem_json};
+    use crate::trpc::{ProblemDetails, ProblemParameter};
+
+    #[test]
+    fn extracts_reference_solution_method_only() {
+        let definition = r#"
+class VectorAddition:
+    def reference_solution(self, a, b):
+        c = a + b
+        return c
+
+    def verify_result(self, expected, actual):
+        return True, {}
+"#;
+
+        let reference = extract_reference_solution(definition).unwrap();
+
+        assert!(reference.contains("def reference_solution"));
+        assert!(reference.contains("return c"));
+        assert!(!reference.contains("def verify_result"));
+    }
+
+    #[test]
+    fn returns_none_when_reference_solution_is_missing() {
+        assert!(extract_reference_solution("class Problem:\n    pass").is_none());
+    }
+
+    #[test]
+    fn problem_json_includes_language_starters() {
+        let problem = ProblemDetails {
+            id: "id".to_string(),
+            slug: "vector-addition".to_string(),
+            title: "Vector Addition".to_string(),
+            difficulty: Some("EASY".to_string()),
+            author: None,
+            tags: None,
+            description: Some("Add vectors.".to_string()),
+            definition: Some(
+                "class P:\n    def reference_solution(self, a, b):\n        return a + b\n"
+                    .to_string(),
+            ),
+            parameters: Some(vec![
+                ProblemParameter {
+                    name: "d_input".to_string(),
+                    ty: "float".to_string(),
+                    const_: Some("true".to_string()),
+                    pointer: Some("true".to_string()),
+                    constant: None,
+                },
+                ProblemParameter {
+                    name: "d_output".to_string(),
+                    ty: "float".to_string(),
+                    const_: Some("false".to_string()),
+                    pointer: Some("true".to_string()),
+                    constant: None,
+                },
+            ]),
+        };
+
+        let json = problem_json(&problem);
+        let starters = json.get("starters").expect("starters should exist");
+
+        assert!(starters["cuda"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("extern \"C\" void solution"));
+        assert!(starters["python"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("def solution"));
+        assert!(starters["mojo"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("@export"));
+        assert!(starters["cute"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("@cute.jit"));
+        assert!(starters["cutile"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("import cuda.tile as ct"));
+    }
+}
+
+pub fn pretty_print_problem(problem: &ProblemDetails, parameters: &Parameters) {
+    if parameters.get_json_output_flag() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&problem_json(problem))
+                .expect("Failed to serialize problem")
+        );
+        return;
+    }
+
+    let show_description = !parameters.get_reference_only_flag();
+    let show_reference = !parameters.get_description_only_flag();
+
+    println!("{}", style(&problem.title).green().bold());
+    println!("{}", style(&problem.slug).dim());
+
+    if let Some(difficulty) = &problem.difficulty {
+        println!("Difficulty: {}", difficulty);
+    }
+    if let Some(author) = &problem.author {
+        println!("Author: {}", author);
+    }
+    if let Some(tags) = &problem.tags {
+        if !tags.is_empty() {
+            println!("Tags: {}", tags.join(", "));
+        }
+    }
+
+    if show_description {
+        println!("\n{}", style("Description").bold().underlined());
+        match problem.description.as_deref() {
+            Some(description) if !description.trim().is_empty() => {
+                println!("{}", description.trim())
+            }
+            _ => println!("{}", style("No description available.").yellow()),
+        }
+    }
+
+    if !parameters.get_reference_only_flag() {
+        if let Some(problem_parameters) = &problem.parameters {
+            if !problem_parameters.is_empty() {
+                println!("\n{}", style("Parameters").bold().underlined());
+                for parameter in problem_parameters {
+                    let mut attrs = vec![parameter.ty.clone()];
+                    if parameter.pointer.as_deref() == Some("true") {
+                        attrs.push("pointer".to_string());
+                    }
+                    if parameter.constant.as_deref() == Some("true") {
+                        attrs.push("const".to_string());
+                    }
+                    println!(
+                        "{}: {}",
+                        style(&parameter.name).cyan().bold(),
+                        attrs.join(", ")
+                    );
+                }
+            }
+        }
+    }
+
+    if show_reference {
+        println!("\n{}", style("PyTorch Reference").bold().underlined());
+        match problem
+            .definition
+            .as_deref()
+            .and_then(extract_reference_solution)
+        {
+            Some(reference) => {
+                println!("{}", reference.trim());
+            }
+            None => println!(
+                "{}",
+                style("No reference_solution function found in the problem definition.").yellow()
+            ),
+        }
+    }
+}
+
+fn print_json_section(label: &str, value: Option<&Value>) {
+    if let Some(value) = value {
+        println!("\n{}", style(label).bold().underlined());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+        );
+    }
+}
+
+pub fn pretty_print_sample_response(response: impl Read, parameters: &Parameters) {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(default_spinner_style());
+    spinner.set_message("Running sample...");
+    if !parameters.get_json_output_flag() {
+        spinner.enable_steady_tick(Duration::from_millis(80));
+    }
+
+    let reader = BufReader::new(response);
+
+    for line in reader.lines().flatten() {
+        if !parameters.get_json_output_flag() {
+            spinner.tick();
+        }
+
+        if !line.starts_with("data: ") {
+            continue;
+        }
+
+        let json_data = &line[6..];
+        let Ok(json) = serde_json::from_str::<Value>(json_data) else {
+            continue;
+        };
+
+        match json.get("status").and_then(|s| s.as_str()) {
+            Some("PASSED") => {
+                if parameters.get_json_output_flag() {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json)
+                            .expect("Failed to serialize sample output")
+                    );
+                    return;
+                }
+                spinner.finish_and_clear();
+                println!("{}", style("✅ Sample Passed").green().bold());
+                print_json_section("Input", json.get("input"));
+                print_json_section("Expected Output", json.get("expected_output"));
+                print_json_section("Actual Output", json.get("output"));
+                if let Some(stdout) = json.get("stdout").and_then(|v| v.as_str()) {
+                    if !stdout.trim().is_empty() {
+                        println!("\n{}", style("Stdout").bold().underlined());
+                        println!("{}", stdout.trim());
+                    }
+                }
+                if let Some(stderr) = json.get("stderr").and_then(|v| v.as_str()) {
+                    if !stderr.trim().is_empty() {
+                        println!("\n{}", style("Stderr").bold().underlined());
+                        println!("{}", style(stderr.trim()).yellow());
+                    }
+                }
+                return;
+            }
+            Some("FAILED") => {
+                if parameters.get_json_output_flag() {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json)
+                            .expect("Failed to serialize sample output")
+                    );
+                    return;
+                }
+                spinner.finish_and_clear();
+                println!("{}", style("❌ Sample Failed").red().bold());
+                print_json_section("Input", json.get("input"));
+                print_json_section("Expected Output", json.get("expected_output"));
+                print_json_section("Actual Output", json.get("output"));
+                print_json_section("Debug Info", json.get("debug_info"));
+                return;
+            }
+            Some("COMPILE_ERROR")
+            | Some("RUNTIME_ERROR")
+            | Some("TIME_LIMIT_EXCEEDED")
+            | Some("TOO_MANY_REQUESTS")
+            | Some("RATE_LIMIT_EXCEEDED")
+            | Some("SANDBOX_TIMEOUT")
+            | Some("SANDBOX_OUTPUT_LIMIT")
+            | Some("OUTPUT_LIMIT_EXCEEDED")
+            | Some("ERROR") => {
+                if parameters.get_json_output_flag() {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json)
+                            .expect("Failed to serialize sample output")
+                    );
+                    return;
+                }
+                spinner.finish_and_clear();
+                let status = json
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("ERROR");
+                let message = json
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .or_else(|| json.get("error").and_then(|m| m.as_str()))
+                    .unwrap_or("Sample run failed");
+                println!("{}: {}", style(status).red().bold(), message);
+                if let Some(details) = json.get("details").and_then(|d| d.as_str()) {
+                    println!("\n{}", style("Details").bold().underlined());
+                    println!("{}", details);
+                }
+                return;
+            }
+            Some(status) => {
+                spinner.set_message(status.to_string());
+            }
+            None => {}
+        }
+    }
+
+    if parameters.get_json_output_flag() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "status": "INCOMPLETE",
+                "message": "Sample stream ended without a final result."
+            }))
+            .expect("Failed to serialize sample output")
+        );
+    } else {
+        spinner.finish_and_clear();
+        println!(
+            "{}",
+            style("Sample stream ended without a final result.").yellow()
+        );
+    }
+}
+
+fn read_sse_json_events(response: impl Read) -> Vec<Value> {
+    let reader = BufReader::new(response);
+    let mut events = Vec::new();
+
+    for line in reader.lines().flatten() {
+        let Some(json_data) = line.strip_prefix("data: ") else {
+            continue;
+        };
+
+        if let Ok(json) = serde_json::from_str::<Value>(json_data) {
+            events.push(json);
+        }
+    }
+
+    events
+}
+
+fn status_of(event: &Value) -> Option<&str> {
+    event.get("status").and_then(|status| status.as_str())
+}
+
+fn string_any<'a>(event: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| event.get(*key).and_then(|value| value.as_str()))
+}
+
+fn u64_any(event: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| event.get(*key).and_then(|value| value.as_u64()))
+}
+
+fn f64_any(event: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| event.get(*key).and_then(|value| value.as_f64()))
+}
+
+fn event_error_message(event: &Value) -> String {
+    string_any(event, &["error", "message"])
+        .unwrap_or("No error message returned by the server.")
+        .to_string()
+}
+
+fn print_error_event(event: &Value) {
+    let status = status_of(event).unwrap_or("ERROR");
+    println!(
+        "{}: {}",
+        style(status).red().bold(),
+        event_error_message(event)
+    );
+
+    if let Some(details) = string_any(event, &["details", "stderr", "traceback"]) {
+        if !details.trim().is_empty() {
+            println!("\n{}", style("Details").bold().underlined());
+            println!("{}", details.trim());
+        }
+    }
+}
+
+fn collected_results(events: &[Value], event_status: &str) -> Vec<Value> {
+    events
+        .iter()
+        .filter(|event| status_of(event) == Some(event_status))
+        .filter_map(|event| event.get("result").cloned())
+        .collect()
+}
+
+fn array_field_or_collected(
+    event: Option<&Value>,
+    field: &str,
+    collected: Vec<Value>,
+) -> Vec<Value> {
+    event
+        .and_then(|event| event.get(field))
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or(collected)
+}
+
+fn compact_benchmark_results(results: &[Value]) -> Vec<Value> {
+    results
+        .iter()
+        .map(|result| {
+            serde_json::json!({
+                "test_id": result.get("test_id").cloned().unwrap_or(Value::Null),
+                "name": result.get("name").cloned().unwrap_or(Value::Null),
+                "gflops": result.get("gflops").cloned().unwrap_or(Value::Null),
+                "runtime_ms": result.get("runtime_ms").cloned().unwrap_or(Value::Null),
+                "status": result.get("status").cloned().unwrap_or_else(|| Value::String("PASSED".to_string())),
+            })
+        })
+        .collect()
+}
+
+pub fn pretty_print_checker_response(response: impl Read, parameters: &Parameters) {
+    let events = read_sse_json_events(response);
+    let final_event = events.iter().rev().find(|event| {
+        matches!(
+            status_of(event),
+            Some(
+                "CHECKED"
+                    | "WRONG_ANSWER"
+                    | "COMPILE_ERROR"
+                    | "RUNTIME_ERROR"
+                    | "TIME_LIMIT_EXCEEDED"
+                    | "MEMORY_LIMIT_EXCEEDED"
+                    | "RATE_LIMIT_EXCEEDED"
+                    | "SANDBOX_TIMEOUT"
+                    | "SANDBOX_OUTPUT_LIMIT"
+                    | "OUTPUT_LIMIT_EXCEEDED"
+                    | "ERROR"
+            )
+        )
+    });
+    let test_results = array_field_or_collected(
+        final_event,
+        "test_results",
+        collected_results(&events, "TEST_RESULT"),
+    );
+    let passed_tests = final_event
+        .and_then(|event| u64_any(event, &["passed_tests", "passedTests"]))
+        .unwrap_or_else(|| {
+            test_results
+                .iter()
+                .filter(|result| status_of(result) == Some("PASSED"))
+                .count() as u64
+        });
+    let total_tests = final_event
+        .and_then(|event| u64_any(event, &["total_tests", "totalTests"]))
+        .unwrap_or(test_results.len() as u64);
+    let status = final_event
+        .and_then(status_of)
+        .unwrap_or(if events.is_empty() {
+            "NO_RESPONSE"
+        } else {
+            "INCOMPLETE"
+        });
+
+    if parameters.get_json_output_flag() {
+        let mut output = serde_json::json!({
+            "status": status,
+            "passed_tests": passed_tests,
+            "total_tests": total_tests,
+            "test_results": test_results,
+        });
+
+        if let Some(final_event) = final_event {
+            if let Some(debug_info) = final_event.get("debug_info") {
+                output["debug_info"] = debug_info.clone();
+            }
+            if let Some(message) = string_any(final_event, &["error", "message"]) {
+                output["message"] = Value::String(message.to_string());
+            }
+            if let Some(details) = final_event.get("details") {
+                output["details"] = details.clone();
+            }
+        }
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).expect("Failed to serialize checker output")
+        );
+        return;
+    }
+
+    match status {
+        "CHECKED" if passed_tests == total_tests => {
+            println!("{}", style("✅ CHECKER RESULT: PASSED").green().bold());
+            println!("Tests: {}/{} passed", passed_tests, total_tests);
+        }
+        "CHECKED" | "WRONG_ANSWER" => {
+            println!("{}", style("❌ CHECKER RESULT: FAILED").red().bold());
+            println!("Tests: {}/{} passed", passed_tests, total_tests);
+
+            if let Some(final_event) = final_event {
+                print_json_section("Debug Info", final_event.get("debug_info"));
+            }
+        }
+        "COMPILE_ERROR"
+        | "RUNTIME_ERROR"
+        | "TIME_LIMIT_EXCEEDED"
+        | "MEMORY_LIMIT_EXCEEDED"
+        | "RATE_LIMIT_EXCEEDED"
+        | "SANDBOX_TIMEOUT"
+        | "SANDBOX_OUTPUT_LIMIT"
+        | "OUTPUT_LIMIT_EXCEEDED"
+        | "ERROR" => {
+            if let Some(final_event) = final_event {
+                print_error_event(final_event);
+            }
+        }
+        "NO_RESPONSE" => println!("{}", style("Checker returned no response.").red().bold()),
+        _ => {
+            println!(
+                "{}",
+                style("Checker stream ended before a final result.").yellow()
+            );
+            println!("Tests observed: {}/{}", passed_tests, total_tests);
+        }
+    }
+
+    if !test_results.is_empty() {
+        println!("\n{}", style("Test Results").bold().underlined());
+        for (index, result) in test_results.iter().enumerate() {
+            let name = result
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Unnamed");
+            let result_status = status_of(result).unwrap_or("UNKNOWN");
+            let styled_status = if result_status == "PASSED" {
+                style(result_status).green().bold()
+            } else {
+                style(result_status).red().bold()
+            };
+            println!("{}. {} - {}", index + 1, name, styled_status);
+        }
+    }
+}
+
+pub fn pretty_print_benchmark_response_v2(response: impl Read, parameters: &Parameters) {
+    let events = read_sse_json_events(response);
+    let final_event = events.iter().rev().find(|event| {
+        matches!(
+            status_of(event),
+            Some(
+                "ACCEPTED"
+                    | "BENCHMARKED"
+                    | "WRONG_ANSWER"
+                    | "COMPILE_ERROR"
+                    | "RUNTIME_ERROR"
+                    | "TIME_LIMIT_EXCEEDED"
+                    | "MEMORY_LIMIT_EXCEEDED"
+                    | "RATE_LIMIT_EXCEEDED"
+                    | "SANDBOX_TIMEOUT"
+                    | "SANDBOX_OUTPUT_LIMIT"
+                    | "OUTPUT_LIMIT_EXCEEDED"
+                    | "ERROR"
+            )
+        ) || (event.get("avg_gflops").is_some() && event.get("avg_runtime_ms").is_some())
+    });
+    let benchmark_results = array_field_or_collected(
+        final_event,
+        "benchmark_results",
+        collected_results(&events, "BENCHMARK_RESULT"),
+    );
+    let avg_gflops = final_event.and_then(|event| f64_any(event, &["avg_gflops", "avgGflops"]));
+    let avg_runtime_ms =
+        final_event.and_then(|event| f64_any(event, &["avg_runtime_ms", "avgRuntimeMs"]));
+    let status = final_event
+        .and_then(status_of)
+        .unwrap_or(if final_event.is_some() {
+            "ACCEPTED"
+        } else if events.is_empty() {
+            "NO_RESPONSE"
+        } else {
+            "INCOMPLETE"
+        });
+
+    if parameters.get_json_output_flag() {
+        let compact_results = compact_benchmark_results(&benchmark_results);
+        let mut output = serde_json::json!({
+            "status": status,
+            "avg_gflops": avg_gflops,
+            "avg_runtime_ms": avg_runtime_ms,
+            "benchmark_results": compact_results,
+        });
+
+        if let Some(final_event) = final_event {
+            if let Some(message) = string_any(final_event, &["error", "message"]) {
+                output["message"] = Value::String(message.to_string());
+            }
+            if let Some(details) = final_event.get("details") {
+                output["details"] = details.clone();
+            }
+            if let Some(debug_info) = final_event.get("debug_info") {
+                output["debug_info"] = debug_info.clone();
+            }
+        }
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).expect("Failed to serialize benchmark output")
+        );
+        return;
+    }
+
+    match status {
+        "ACCEPTED" | "BENCHMARKED" => {
+            println!("{}", style("✅ BENCHMARK RESULT: ACCEPTED").green().bold());
+            if let Some(avg_runtime_ms) = avg_runtime_ms {
+                println!("Average runtime: {:.4} ms", avg_runtime_ms);
+            }
+            if let Some(avg_gflops) = avg_gflops {
+                println!("Average GFLOPS: {:.2}", avg_gflops);
+            }
+        }
+        "WRONG_ANSWER" => {
+            println!(
+                "{}",
+                style("❌ BENCHMARK RESULT: WRONG ANSWER").red().bold()
+            );
+            if let Some(final_event) = final_event {
+                print_json_section("Debug Info", final_event.get("debug_info"));
+            }
+        }
+        "COMPILE_ERROR"
+        | "RUNTIME_ERROR"
+        | "TIME_LIMIT_EXCEEDED"
+        | "MEMORY_LIMIT_EXCEEDED"
+        | "RATE_LIMIT_EXCEEDED"
+        | "SANDBOX_TIMEOUT"
+        | "SANDBOX_OUTPUT_LIMIT"
+        | "OUTPUT_LIMIT_EXCEEDED"
+        | "ERROR" => {
+            if let Some(final_event) = final_event {
+                print_error_event(final_event);
+            }
+        }
+        "NO_RESPONSE" => println!("{}", style("Benchmark returned no response.").red().bold()),
+        _ => println!(
+            "{}",
+            style("Benchmark stream ended before a final result.").yellow()
+        ),
+    }
+
+    if !benchmark_results.is_empty() {
+        println!("\n{}", style("Benchmark Results").bold().underlined());
+        println!(
+            "{:<30} {:>12} {:>16}",
+            style("Test Case").bold(),
+            style("GFLOPS").bold(),
+            style("Runtime (ms)").bold()
+        );
+        println!("{}", style("─".repeat(62)).dim());
+
+        for result in benchmark_results {
+            let name = result
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Unnamed");
+            let gflops = f64_any(&result, &["gflops"]).unwrap_or(0.0);
+            let runtime_ms = f64_any(&result, &["runtime_ms", "runtimeMs"]).unwrap_or(0.0);
+            println!("{:<30} {:>12.2} {:>16.4}", name, gflops, runtime_ms);
+        }
     }
 }
 
@@ -1072,11 +1819,14 @@ fn print_invalid_file_error() {
     println!("\n{}", style("Requirements:").green().bold());
     println!("{}", style("─".repeat(60)).dim());
     println!("  • File must exist");
-    println!("  • File must be either a .cu (CUDA) .py (Python) or .mojo (Mojo) file");
+    println!(
+        "  • File must be a .cu, .py, or .mojo file. Use --language cute or --language cutile for CuTe/cuTile Python files"
+    );
     println!("  • File must be readable");
 
     println!("\n{}", style("Example:").yellow().bright().bold());
     println!("  tensara checker -p relu -s ./my_solution.cu");
+    println!("  tensara checker -p relu -s ./my_solution.py --language cute");
 
     println!("{}", style("═".repeat(60)).dim());
 }
@@ -1134,6 +1884,94 @@ pub fn print_auth_error() {
     println!("{}", style("═".repeat(60)).dim());
 }
 
+pub fn print_request_error(error_message: &str) {
+    println!("\n{}", style("⚠️ REQUEST FAILED ⚠️").red().bold());
+    println!("{}", style("═".repeat(60)).dim());
+    println!(
+        "{}: {}",
+        style("Reason").red().bold(),
+        style(error_message).yellow()
+    );
+    println!(
+        "{}",
+        style("Check your network connection and Tensara API base URL.")
+            .yellow()
+            .bold()
+    );
+    println!("{}", style("═".repeat(60)).dim());
+}
+
+pub fn print_http_error(error: &HttpError) {
+    println!("\n{}", style("⚠️ SERVER ERROR ⚠️").red().bold());
+    println!("{}", style("═".repeat(72)).dim());
+    println!(
+        "{}: {}",
+        style("Status").red().bold(),
+        style(&error.status_text).yellow()
+    );
+    println!(
+        "{}: {}",
+        style("Endpoint").cyan().bold(),
+        style(&error.endpoint).dim()
+    );
+
+    if let Some(content_type) = &error.content_type {
+        println!(
+            "{}: {}",
+            style("Content-Type").cyan().bold(),
+            style(content_type).dim()
+        );
+    }
+
+    let summary = error
+        .error
+        .as_deref()
+        .or(error.message.as_deref())
+        .unwrap_or("Request failed");
+    println!(
+        "{}: {}",
+        style("Message").yellow().bold(),
+        style(summary).red()
+    );
+
+    if let Some(details) = error.details.as_deref() {
+        println!("\n{}", style("Details:").yellow().bold());
+        println!("{}", details);
+    } else if !error.raw_body.trim().is_empty()
+        && error.raw_body.trim() != "null"
+        && error.raw_body.trim() != "{}"
+    {
+        println!("\n{}", style("Response Body:").yellow().bold());
+        println!("{}", error.raw_body.trim());
+    }
+
+    match error.status_code {
+        404 => println!(
+            "\n{}",
+            style(
+                "The Tensara endpoint was not found. Check that your CLI is pointing at the right backend."
+            )
+            .yellow()
+            .bold()
+        ),
+        429 => println!(
+            "\n{}",
+            style("Rate limit exceeded. Wait a bit before retrying.")
+                .yellow()
+                .bold()
+        ),
+        500..=599 => println!(
+            "\n{}",
+            style("The Tensara backend failed while handling your request.")
+                .yellow()
+                .bold()
+        ),
+        _ => {}
+    }
+
+    println!("{}", style("═".repeat(72)).dim());
+}
+
 fn extract_value_from_error(error_message: &str) -> Option<String> {
     let parts: Vec<&str> = error_message.split(':').collect();
     if parts.len() >= 3 {
@@ -1167,6 +2005,11 @@ pub fn print_welcome_message() {
         "  • {} - {}",
         style("problems").green().bold(),
         "List all available problems"
+    );
+    println!(
+        "  • {} - {}",
+        style("problem").green().bold(),
+        "Show a problem description and PyTorch reference solution"
     );
     println!(
         "  • {} - {}",

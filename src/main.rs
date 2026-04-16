@@ -3,16 +3,20 @@ use serde_json::Value;
 use std::path::Path;
 use std::{fs, process::exit};
 use tensara::{
+    api::api_url,
     auth::AuthInfo,
-    client,
+    client::{self, ClientError},
     init::init,
     pretty::{self, pretty_print_problems},
+    trpc::get_problem_by_slug,
     Parameters,
 };
 
-const COMPILED_CHECKER_ENDPOINT: &str = env!("COMPILED_CHECKER_ENDPOINT");
-const COMPILED_BENCHMARK_ENDPOINT: &str = env!("COMPILED_BENCHMARK_ENDPOINT");
-const COMPILED_SUBMIT_ENDPOINT: &str = env!("COMPILED_SUBMIT_ENDPOINT");
+fn sample_endpoint_from_submit(submit_endpoint: &str) -> String {
+    submit_endpoint
+        .replace("/api/submissions/direct-submit", "/api/submissions/sample")
+        .replace("/direct-submit", "/sample")
+}
 
 fn main() {
     #[cfg(debug_assertions)]
@@ -22,11 +26,14 @@ fn main() {
     let parameters: Parameters = Parameters::new();
 
     match parameters.get_command_name().as_str() {
-        "checker" | "benchmark" | "submit" => {
+        "checker" | "benchmark" | "submit" | "sample" => {
             execute_problem_command(&parameters, &auth_info);
         }
         "problems" => {
             pretty_print_problems(&parameters);
+        }
+        "problem" => {
+            execute_problem_details_command(&parameters);
         }
         "auth" => {
             execute_auth_command(&parameters);
@@ -49,11 +56,13 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
     }
 
     let checker_endpoint =
-        std::env::var("CHECKER_ENDPOINT").unwrap_or_else(|_| COMPILED_CHECKER_ENDPOINT.to_string());
+        std::env::var("CHECKER_ENDPOINT").unwrap_or_else(|_| api_url("/api/submissions/checker"));
     let benchmark_endpoint = std::env::var("BENCHMARK_ENDPOINT")
-        .unwrap_or_else(|_| COMPILED_BENCHMARK_ENDPOINT.to_string());
-    let submit_endpoint =
-        std::env::var("SUBMIT_ENDPOINT").unwrap_or_else(|_| COMPILED_SUBMIT_ENDPOINT.to_string());
+        .unwrap_or_else(|_| api_url("/api/submissions/benchmark"));
+    let submit_endpoint = std::env::var("SUBMIT_ENDPOINT")
+        .unwrap_or_else(|_| api_url("/api/submissions/direct-submit"));
+    let sample_endpoint = std::env::var("SAMPLE_ENDPOINT")
+        .unwrap_or_else(|_| sample_endpoint_from_submit(&submit_endpoint));
 
     let command_type = parameters.get_command_name();
     let gpu_type = parameters.get_gpu_type();
@@ -67,7 +76,7 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
         exit(1);
     }
 
-    let response = match command_type.as_str() {
+    let response = match match command_type.as_str() {
         "benchmark" => client::send_post_request_to_endpoint(
             &benchmark_endpoint,
             problem_slug,
@@ -95,13 +104,37 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
             gpu_type,
             auth_info,
         ),
+        "sample" => client::send_post_request_to_endpoint(
+            &sample_endpoint,
+            problem_slug,
+            code,
+            dtype,
+            language,
+            gpu_type,
+            auth_info,
+        ),
         _ => unreachable!("Invalid command type for problem execution"),
+    } {
+        Ok(response) => response,
+        Err(ClientError::Http(error)) => {
+            if error.status_code == 401 {
+                pretty::print_auth_error();
+            } else {
+                pretty::print_http_error(&error);
+            }
+            exit(1);
+        }
+        Err(ClientError::RequestFailed(error)) => {
+            pretty::print_request_error(&error);
+            exit(1);
+        }
     };
 
     match command_type.as_str() {
-        "benchmark" => pretty::pretty_print_benchmark_response(response),
-        "checker" => pretty::pretty_print_checker_streaming_response(response),
+        "benchmark" => pretty::pretty_print_benchmark_response_v2(response, parameters),
+        "checker" => pretty::pretty_print_checker_response(response, parameters),
         "submit" => pretty::pretty_print_submit_response(response),
+        "sample" => pretty::pretty_print_sample_response(response, parameters),
         _ => unreachable!("Invalid command type for problem execution"),
     }
 }
@@ -110,6 +143,16 @@ fn execute_auth_command(parameters: &Parameters) {
     let token = parameters.get_token();
     let auth_info = AuthInfo::new(token.unwrap().to_string(), "Tensara".to_string());
     auth_info.save();
+}
+
+fn execute_problem_details_command(parameters: &Parameters) {
+    let slug = parameters.get_problem_slug();
+    let problem = get_problem_by_slug(slug).unwrap_or_else(|error| {
+        eprintln!("Failed to fetch problem '{}': {}", slug, error);
+        exit(1);
+    });
+
+    pretty::pretty_print_problem(&problem, parameters);
 }
 
 fn execute_init_command(parameters: &Parameters) {
@@ -145,43 +188,29 @@ fn execute_init_command(parameters: &Parameters) {
     let dir = parameters.get_directory();
     let slug = parameters.get_problem_slug();
     let path = Path::new(dir);
-    init(path, language, slug).unwrap();
+    if let Err(error) = init(path, language, slug) {
+        eprintln!("Failed to initialize problem '{}': {}", slug, error);
+        exit(1);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use tensara::auth::AuthInfo;
-    use tensara::problems::is_valid_problem_slug;
-    use tensara::trpc::get_problem_by_slug;
+    use super::sample_endpoint_from_submit;
 
     #[test]
-    fn test_is_valid_problem_slug() {
-        let slug = "vector-addition";
-        assert!(is_valid_problem_slug(slug));
+    fn derives_sample_endpoint_from_full_submit_endpoint() {
+        assert_eq!(
+            sample_endpoint_from_submit("http://localhost:3000/api/submissions/direct-submit"),
+            "http://localhost:3000/api/submissions/sample"
+        );
     }
 
     #[test]
-    fn test_is_not_valid_problem_slug() {
-        let slug = "vector-adition";
-        assert!(!is_valid_problem_slug(slug));
-    }
-
-    #[test]
-    fn test_auth_info() {
-        let auth_info = AuthInfo::new("test_token".to_string(), "Tensara".to_string());
-        auth_info.save();
-        let loaded_auth_info = AuthInfo::load();
-        assert_eq!(auth_info.access_token, loaded_auth_info.access_token);
-    }
-
-    #[test]
-    #[ignore]
-    fn test_get_problem_by_slug_live() {
-        let result = get_problem_by_slug("vector-addition");
-        assert!(result.is_ok());
-        let details = result.unwrap();
-
-        assert_eq!(details.slug, "vector-addition");
-        assert!(details.parameters.is_some());
+    fn derives_sample_endpoint_from_short_submit_endpoint() {
+        assert_eq!(
+            sample_endpoint_from_submit("https://tensara.org/direct-submit"),
+            "https://tensara.org/sample"
+        );
     }
 }

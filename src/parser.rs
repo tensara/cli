@@ -1,7 +1,9 @@
-use clap::{builder::TypedValueParser, command, Arg, ArgMatches, Command};
+use crate::problems::is_valid_problem_slug;
+use clap::{builder::TypedValueParser, command, Arg, ArgAction, ArgMatches, Command};
 use std::ffi::OsStr;
 use std::path::Path;
-use crate::problems::is_valid_problem_slug;
+
+const SUPPORTED_LANGUAGES: [&str; 5] = ["cuda", "python", "mojo", "cute", "cutile"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GPU {
@@ -36,7 +38,7 @@ impl std::fmt::Display for GPU {
 }
 
 impl TypedValueParser for ProblemNameParser {
-    type Value = String;   
+    type Value = String;
 
     fn parse_ref(
         &self,
@@ -115,7 +117,7 @@ impl TypedValueParser for SolutionFile {
                     clap::error::ErrorKind::InvalidValue,
                     format!("SOLUTION_FILE: {}", path_str),
                 ));
-            } 
+            }
         } else {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
@@ -163,7 +165,16 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Relative path to the solution file")
                             .value_parser(SolutionFile)
                             .required(true),
-                    )                    
+                    )
+                    .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
+                    )
             )
             .subcommand(
                 Command::new("checker")
@@ -195,7 +206,22 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Relative path to the solution file")
                             .value_parser(SolutionFile)
                             .required(true),
-                    )                    
+                    )
+                    .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
+                    )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    )
             )
             .subcommand(
                 Command::new("benchmark")
@@ -228,6 +254,68 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .value_parser(SolutionFile)
                             .required(true)
                     )
+                    .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
+                    )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    )
+            )
+            .subcommand(
+                Command::new("sample")
+                    .about("Run your solution against the problem sample case")
+                    .arg_required_else_help(true)
+                    .arg(
+                        Arg::new("gpu_type")
+                            .short('g')
+                            .value_name("GPU_TYPE")
+                            .help("Type of the GPU to use")
+                            .default_value("T4")
+                            .required(false)
+                            .value_parser(GPUParser),
+                    )
+                    .arg(
+                        Arg::new("problem_name")
+                            .short('p')
+                            .long("problem")
+                            .value_name("PROBLEM_NAME")
+                            .value_parser(ProblemNameParser)
+                            .help("Name of the problem to test")
+                            .required(true),
+                    )
+                    .arg(
+                        Arg::new("solution_file")
+                            .short('s')
+                            .long("solution")
+                            .value_name("SOLUTION_FILE")
+                            .help("Relative path to the solution file")
+                            .value_parser(SolutionFile)
+                            .required(true),
+                    )
+                    .arg(
+                        Arg::new("language")
+                            .short('l')
+                            .long("language")
+                            .value_name("LANGUAGE")
+                            .help("Override solution language: cuda, python, mojo, cute, cutile")
+                            .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES),
+                    )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    )
             )
             .subcommand(
                 Command::new("problems")
@@ -249,6 +337,43 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Field to sort by: slug, title, difficulty, author")
                             .required(false),
                     )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    )
+            )
+            .subcommand(
+                Command::new("problem")
+                    .about("Show details for a single problem")
+                    .arg_required_else_help(true)
+                    .arg(
+                        Arg::new("problem_name")
+                            .value_name("PROBLEM_NAME")
+                            .help("Name of the problem to inspect")
+                            .required(true)
+                            .index(1)
+                            .value_parser(ProblemNameParser),
+                    )
+                    .arg(
+                        Arg::new("description_only")
+                            .long("description-only")
+                            .help("Only print the problem description")
+                            .action(ArgAction::SetTrue),
+                    )
+                    .arg(
+                        Arg::new("reference_only")
+                            .long("reference-only")
+                            .help("Only print the PyTorch reference solution")
+                            .action(ArgAction::SetTrue),
+                    )
+                    .arg(
+                        Arg::new("json_output")
+                            .long("json")
+                            .help("Print machine-readable JSON")
+                            .action(ArgAction::SetTrue),
+                    ),
             )
             .subcommand(
                 Command::new("auth")
@@ -270,7 +395,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Directory where you want to initialize the file")
                             .value_name("DIRECTORY")
                             .required(false)
-                            .index(1)  
+                            .index(1)
                     )
                     .arg(
                         Arg::new("problem_name")
@@ -278,7 +403,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .long("problem")
                             .value_name("PROBLEM_NAME")
                             .help("Name of the problem to test")
-                            .required_unless_present("all") 
+                            .required_unless_present("all")
                             .value_parser(ProblemNameParser),
                     )
                     .arg(
@@ -289,6 +414,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Solution file language")
                             .default_value("cuda")
                             .required(false)
+                            .value_parser(SUPPORTED_LANGUAGES)
                     )
                     .arg(
                         Arg::new("all")
@@ -296,7 +422,7 @@ pub fn parse_args(args: Option<Vec<&str>>) -> Result<ArgMatches, clap::Error> {
                             .help("Initialize all problems")
                             .action(clap::ArgAction::SetTrue),
                     )
-                
+
             );
 
     if let Some(args) = args {
@@ -330,6 +456,10 @@ pub fn get_auth_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("auth").unwrap()
 }
 
+pub fn get_problem_matches(matches: &ArgMatches) -> &ArgMatches {
+    matches.subcommand_matches("problem").unwrap()
+}
+
 pub fn get_init_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("init").unwrap()
 }
@@ -337,6 +467,11 @@ pub fn get_init_matches(matches: &ArgMatches) -> &ArgMatches {
 pub fn get_submit_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("submit").unwrap()
 }
+
+pub fn get_sample_matches(matches: &ArgMatches) -> &ArgMatches {
+    matches.subcommand_matches("sample").unwrap()
+}
+
 pub fn get_problems_matches(matches: &ArgMatches) -> &ArgMatches {
     matches.subcommand_matches("problems").unwrap()
 }
@@ -345,5 +480,19 @@ pub fn get_language_type(matches: &ArgMatches) -> &String {
     matches.get_one::<String>("language").unwrap()
 }
 
+pub fn get_description_only_flag(matches: &ArgMatches) -> bool {
+    matches.get_flag("description_only")
+}
 
+pub fn get_reference_only_flag(matches: &ArgMatches) -> bool {
+    matches.get_flag("reference_only")
+}
 
+pub fn get_json_output_flag(matches: &ArgMatches) -> bool {
+    matches
+        .try_get_one::<bool>("json_output")
+        .ok()
+        .flatten()
+        .copied()
+        .unwrap_or(false)
+}

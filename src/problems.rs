@@ -4,8 +4,8 @@ use std::fs::File;
 
 fn write_problems_to_disk(problems_path: &std::path::Path) {
     println!("Fetching problems...");
-    let problems = get_all_problems().unwrap_or_else(|_| {
-        eprintln!("Failed to fetch problems.");
+    let problems = get_all_problems().unwrap_or_else(|error| {
+        eprintln!("Failed to fetch problems: {}", error);
         std::process::exit(1);
     });
 

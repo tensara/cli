@@ -1,3 +1,4 @@
+pub mod api;
 pub mod auth;
 pub mod client;
 pub mod init;
@@ -11,7 +12,9 @@ pub enum CommandType {
     Checker,
     Benchmark,
     Submit,
+    Sample,
     Problems,
+    Problem,
     Auth,
     Init,
     None,
@@ -33,6 +36,9 @@ pub struct Parameters {
     // Problems command fields
     fields: Option<Vec<String>>,
     sort_by: Option<String>,
+    description_only: bool,
+    reference_only: bool,
+    json_output: bool,
 
     // Auth command fields
     token: Option<String>,
@@ -78,8 +84,16 @@ impl Parameters {
                 "submit",
                 parser::get_submit_matches(&command_matches),
             ),
+            Some("sample") => Self::from_subcommand(
+                CommandType::Sample,
+                "sample",
+                parser::get_sample_matches(&command_matches),
+            ),
             Some("problems") => {
                 Self::from_problems_matches(parser::get_problems_matches(&command_matches))
+            }
+            Some("problem") => {
+                Self::from_problem_matches(parser::get_problem_matches(&command_matches))
             }
             Some("auth") => Self::from_auth_matches(parser::get_auth_matches(&command_matches)),
             Some("init") => Self::from_init_matches(parser::get_init_matches(&command_matches)),
@@ -107,6 +121,29 @@ impl Parameters {
             gpu_type: None,
             fields,
             sort_by,
+            description_only: false,
+            reference_only: false,
+            json_output: parser::get_json_output_flag(matches),
+            token: None,
+            directory: None,
+            all_flag: false,
+        }
+    }
+
+    fn from_problem_matches(matches: &ArgMatches) -> Self {
+        Self {
+            command_type: CommandType::Problem,
+            command_name: "problem".to_string(),
+            problem_slug: Some(parser::get_problem_name(matches).to_string()),
+            code: None,
+            dtype: None,
+            language: None,
+            gpu_type: None,
+            fields: None,
+            sort_by: None,
+            description_only: parser::get_description_only_flag(matches),
+            reference_only: parser::get_reference_only_flag(matches),
+            json_output: parser::get_json_output_flag(matches),
             token: None,
             directory: None,
             all_flag: false,
@@ -126,6 +163,9 @@ impl Parameters {
             gpu_type: None,
             fields: None,
             sort_by: None,
+            description_only: false,
+            reference_only: false,
+            json_output: false,
             token,
             directory: None,
             all_flag: false,
@@ -157,6 +197,9 @@ impl Parameters {
             gpu_type: None,
             fields: None,
             sort_by: None,
+            description_only: false,
+            reference_only: false,
+            json_output: false,
             token: None,
             directory,
             all_flag,
@@ -169,12 +212,16 @@ impl Parameters {
         let dtype = "float32".to_string();
         let gpu_type = parser::get_gpu_type(matches).to_string();
         let solution_file_extension = solution_file.split('.').last().unwrap();
-        let language = match solution_file_extension {
+        let inferred_language = match solution_file_extension {
             "py" => "python".to_string(),
             "cu" => "cuda".to_string(),
             "mojo" => "mojo".to_string(),
             _ => "unknown".to_string(),
         };
+        let language = matches
+            .get_one::<String>("language")
+            .cloned()
+            .unwrap_or(inferred_language);
 
         let command_name = subcommand.to_string();
 
@@ -188,6 +235,9 @@ impl Parameters {
             gpu_type: Some(gpu_type),
             fields: None,
             sort_by: None,
+            description_only: false,
+            reference_only: false,
+            json_output: parser::get_json_output_flag(matches),
             token: None,
             directory: None,
             all_flag: false,
@@ -251,6 +301,18 @@ impl Parameters {
         self.token.as_ref()
     }
 
+    pub fn get_description_only_flag(&self) -> bool {
+        self.description_only
+    }
+
+    pub fn get_reference_only_flag(&self) -> bool {
+        self.reference_only
+    }
+
+    pub fn get_json_output_flag(&self) -> bool {
+        self.json_output
+    }
+
     pub fn get_all_flag(&self) -> bool {
         self.all_flag
     }
@@ -258,12 +320,19 @@ impl Parameters {
     pub fn is_problem_command(&self) -> bool {
         matches!(
             self.command_type,
-            CommandType::Checker | CommandType::Benchmark | CommandType::Submit
+            CommandType::Checker
+                | CommandType::Benchmark
+                | CommandType::Submit
+                | CommandType::Sample
         )
     }
 
     pub fn is_problems_listing(&self) -> bool {
         matches!(self.command_type, CommandType::Problems)
+    }
+
+    pub fn is_problem_details(&self) -> bool {
+        matches!(self.command_type, CommandType::Problem)
     }
 
     pub fn is_auth_command(&self) -> bool {
