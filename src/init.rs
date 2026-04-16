@@ -95,11 +95,10 @@ pub fn generate_starter_code(
         format!(
             "#include <cuda_runtime.h>
 
-// Note: {} are all device pointers to {} arrays
+// Note: {} are device pointer parameters
 extern \"C\" void solution({}) {{    
 }}",
             names.join(", "),
-            data_type,
             param_str
         )
     } else if language == "python" {
@@ -126,11 +125,10 @@ extern \"C\" void solution({}) {{
         format!(
             "import triton\nimport triton.language as tl
 
-# Note: {} are all {} device tensors
+# Note: {} are device tensor parameters
 def solution({}):
     ",
             names.join(", "),
-            data_type,
             param_str
         )
     } else if language == "mojo" {

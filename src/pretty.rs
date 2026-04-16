@@ -1,5 +1,6 @@
 use crate::{
     client::HttpError,
+    init::generate_starter_code,
     trpc::{get_all_problems, ProblemDetails},
     Parameters,
 };
@@ -142,6 +143,29 @@ fn problem_json(problem: &ProblemDetails) -> Value {
                 .map(Value::String)
                 .unwrap_or(Value::Null),
         );
+
+        let parameters = problem.parameters.as_deref().unwrap_or(&[]);
+        let data_type = "float16";
+        object.insert(
+            "starters".to_string(),
+            serde_json::json!({
+                "cuda": {
+                    "filename": "sol.cu",
+                    "language": "cuda",
+                    "code": generate_starter_code(parameters, "cuda", data_type),
+                },
+                "python": {
+                    "filename": "sol.py",
+                    "language": "python",
+                    "code": generate_starter_code(parameters, "python", data_type),
+                },
+                "mojo": {
+                    "filename": "sol.mojo",
+                    "language": "mojo",
+                    "code": generate_starter_code(parameters, "mojo", data_type),
+                },
+            }),
+        );
     }
 
     value
@@ -149,7 +173,8 @@ fn problem_json(problem: &ProblemDetails) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_reference_solution;
+    use super::{extract_reference_solution, problem_json};
+    use crate::trpc::{ProblemDetails, ProblemParameter};
 
     #[test]
     fn extracts_reference_solution_method_only() {
@@ -173,6 +198,55 @@ class VectorAddition:
     #[test]
     fn returns_none_when_reference_solution_is_missing() {
         assert!(extract_reference_solution("class Problem:\n    pass").is_none());
+    }
+
+    #[test]
+    fn problem_json_includes_language_starters() {
+        let problem = ProblemDetails {
+            id: "id".to_string(),
+            slug: "vector-addition".to_string(),
+            title: "Vector Addition".to_string(),
+            difficulty: Some("EASY".to_string()),
+            author: None,
+            tags: None,
+            description: Some("Add vectors.".to_string()),
+            definition: Some(
+                "class P:\n    def reference_solution(self, a, b):\n        return a + b\n"
+                    .to_string(),
+            ),
+            parameters: Some(vec![
+                ProblemParameter {
+                    name: "d_input".to_string(),
+                    ty: "float".to_string(),
+                    const_: Some("true".to_string()),
+                    pointer: Some("true".to_string()),
+                    constant: None,
+                },
+                ProblemParameter {
+                    name: "d_output".to_string(),
+                    ty: "float".to_string(),
+                    const_: Some("false".to_string()),
+                    pointer: Some("true".to_string()),
+                    constant: None,
+                },
+            ]),
+        };
+
+        let json = problem_json(&problem);
+        let starters = json.get("starters").expect("starters should exist");
+
+        assert!(starters["cuda"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("extern \"C\" void solution"));
+        assert!(starters["python"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("def solution"));
+        assert!(starters["mojo"]["code"]
+            .as_str()
+            .unwrap()
+            .contains("@export"));
     }
 }
 
