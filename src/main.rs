@@ -6,7 +6,7 @@ use tensara::{
     api::api_url,
     auth::AuthInfo,
     client::{self, ClientError},
-    init::init,
+    init::{init, validate_code},
     pretty::{self, pretty_print_problems},
     trpc::get_problem_by_slug,
     Parameters,
@@ -70,6 +70,11 @@ fn execute_problem_command(parameters: &Parameters, auth_info: &AuthInfo) {
     let language = parameters.get_language();
     let dtype = parameters.get_dtype();
     let code = parameters.get_solution_code();
+
+    if let Err(error) = validate_code(code, language) {
+        pretty::print_validation_error(&error);
+        exit(1);
+    }
 
     if !auth_info.is_valid() {
         pretty::print_auth_error();

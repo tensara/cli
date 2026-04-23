@@ -1851,6 +1851,13 @@ fn print_generic_error(error_message: &str) {
     println!("{}", style("═".repeat(60)).dim());
 }
 
+pub fn print_validation_error(error_message: &str) {
+    println!("\n{}", style("⚠️ INVALID SOLUTION ⚠️").red().bold());
+    println!("{}", style("═".repeat(60)).dim());
+    println!("{}", style(error_message).red().bold());
+    println!("{}", style("═".repeat(60)).dim());
+}
+
 pub fn print_file_error(file_path: &str, error_message: &str) {
     println!("\n{}", style("⚠️ FILE ERROR ⚠️").red().bold());
     println!("{}", style("═".repeat(60)).dim());
