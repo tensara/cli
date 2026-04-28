@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$Version = "v1.1.1"
+$Version = "v1.1.2"
 $BinaryName = "tensara-windows-amd64.exe"
 $DownloadUrl = "https://github.com/tensara/tensara-cli/releases/download/$Version/$BinaryName"
 $InstallDir = "$env:LOCALAPPDATA\Tensara"
