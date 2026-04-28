@@ -38,12 +38,6 @@ If you installed from the install script, rerun it:
 curl -sSL https://get.tensara.org/install.sh | bash
 ```
 
-If you installed with Cargo from crates.io:
-
-```bash
-cargo install tensara --force
-```
-
 If you installed from a local checkout:
 
 ```bash
@@ -171,6 +165,29 @@ tensara sample -g T4 -p vector-addition -s solution.cu --json
 
 The sample command prints the input, expected output, actual output, debug info on failure, and captured stdout/stderr when available.
 
+Supported GPU types:
+
+```text
+T4
+H100
+H200
+B200
+A100-80GB
+A10G
+L40S
+L4
+```
+
+Compatibility aliases accepted by the CLI:
+
+```text
+A100
+A100_80GB
+L40s
+```
+
+`cuTile` solutions currently require `B200`, which matches the main Tensara app behavior.
+
 ## Check And Benchmark
 
 Check correctness:
@@ -266,6 +283,7 @@ Agent-specific notes:
 
 - Pointer parameters in CUDA and Mojo starters are device pointers.
 - `.py` files default to `python`; pass `--language cute` or `--language cutile` for CuTe DSL and cuTile Python.
+- The CLI language set matches the main Tensara app: `cuda`, `python`, `mojo`, `cute`, `cutile`.
 - Mojo pointer parameters are passed as raw address `Int` values and reconstructed with `UnsafePointer`.
 - Output pointers refer to preallocated output tensors; solutions should write into those outputs.
 - If a parameter is a pointer, do not assume it can be read on the host side in a Mojo wrapper. Read device pointer data from inside a launched kernel.

@@ -1798,11 +1798,13 @@ fn print_invalid_gpu_error(error_message: &str) {
 
     let gpus = [
         ("T4", "NVIDIA Tesla T4"),
-        ("A100", "NVIDIA A100"),
-        ("A100_80GB", "NVIDIA A100 80GB"),
         ("H100", "NVIDIA H100"),
+        ("H200", "NVIDIA H200"),
+        ("B200", "NVIDIA B200"),
+        ("A100-80GB", "NVIDIA A100 80GB"),
+        ("A10G", "NVIDIA A10G"),
         ("L4", "NVIDIA L4"),
-        ("L40s", "NVIDIA L40S"),
+        ("L40S", "NVIDIA L40S"),
     ];
 
     for (name, desc) in gpus {

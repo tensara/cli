@@ -8,11 +8,13 @@ const SUPPORTED_LANGUAGES: [&str; 5] = ["cuda", "python", "mojo", "cute", "cutil
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GPU {
     T4,
-    A100,
-    A100_80GB,
     H100,
+    H200,
+    B200,
+    A100_80GB,
+    A10G,
     L4,
-    L40s,
+    L40S,
 }
 
 #[derive(Clone)]
@@ -28,11 +30,13 @@ impl std::fmt::Display for GPU {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::T4 => write!(f, "T4"),
-            Self::A100 => write!(f, "A100"),
-            Self::A100_80GB => write!(f, "A100_80GB"),
             Self::H100 => write!(f, "H100"),
+            Self::H200 => write!(f, "H200"),
+            Self::B200 => write!(f, "B200"),
+            Self::A100_80GB => write!(f, "A100-80GB"),
+            Self::A10G => write!(f, "A10G"),
             Self::L4 => write!(f, "L4"),
-            Self::L40s => write!(f, "L40s"),
+            Self::L40S => write!(f, "L40S"),
         }
     }
 }
@@ -72,11 +76,13 @@ impl TypedValueParser for GPUParser {
 
         match value_str.as_str() {
             "T4" => Ok(GPU::T4),
-            "A100" => Ok(GPU::A100),
-            "A100_80GB" => Ok(GPU::A100_80GB),
             "H100" => Ok(GPU::H100),
+            "H200" => Ok(GPU::H200),
+            "B200" => Ok(GPU::B200),
+            "A100" | "A100_80GB" | "A100-80GB" => Ok(GPU::A100_80GB),
+            "A10G" => Ok(GPU::A10G),
             "L4" => Ok(GPU::L4),
-            "L40s" => Ok(GPU::L40s),
+            "L40s" | "L40S" => Ok(GPU::L40S),
             _ => Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!("GPU_TYPE: {}", value_str),
@@ -495,4 +501,48 @@ pub fn get_json_output_flag(matches: &ArgMatches) -> bool {
         .flatten()
         .copied()
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_args, GPU};
+
+    fn parse_gpu(value: &str) -> GPU {
+        let matches = parse_args(Some(vec![
+            "tensara",
+            "sample",
+            "-g",
+            value,
+            "-p",
+            "vector-addition",
+            "-s",
+            "tests/sol.cu",
+        ]))
+        .expect("args should parse");
+
+        *matches
+            .subcommand_matches("sample")
+            .expect("sample matches")
+            .get_one::<GPU>("gpu_type")
+            .expect("gpu_type should exist")
+    }
+
+    #[test]
+    fn parses_canonical_gpu_values() {
+        assert_eq!(parse_gpu("T4"), GPU::T4);
+        assert_eq!(parse_gpu("H100"), GPU::H100);
+        assert_eq!(parse_gpu("H200"), GPU::H200);
+        assert_eq!(parse_gpu("B200"), GPU::B200);
+        assert_eq!(parse_gpu("A100-80GB"), GPU::A100_80GB);
+        assert_eq!(parse_gpu("A10G"), GPU::A10G);
+        assert_eq!(parse_gpu("L40S"), GPU::L40S);
+        assert_eq!(parse_gpu("L4"), GPU::L4);
+    }
+
+    #[test]
+    fn parses_legacy_gpu_aliases() {
+        assert_eq!(parse_gpu("A100"), GPU::A100_80GB);
+        assert_eq!(parse_gpu("A100_80GB"), GPU::A100_80GB);
+        assert_eq!(parse_gpu("L40s"), GPU::L40S);
+    }
 }
