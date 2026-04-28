@@ -25,7 +25,7 @@ detect_platform() {
 }
 
 download_binary() {
-  VERSION=${1:-"v1.1.1"}
+  VERSION=${1:-"v1.1.2"}
   
   if [[ "$OS" == "windows" ]]; then
     ASSET_NAME="tensara-${OS}-${ARCH}.exe"
@@ -96,7 +96,7 @@ main() {
   echo "====================="
   
   # Check for version argument
-  VERSION=${1:-"v1.1.1"}
+  VERSION=${1:-"v1.1.2"}
   
   detect_platform
   download_binary "$VERSION"
