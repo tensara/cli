@@ -591,6 +591,7 @@ pub fn pretty_print_checker_response(response: impl Read, parameters: &Parameter
                     | "TIME_LIMIT_EXCEEDED"
                     | "MEMORY_LIMIT_EXCEEDED"
                     | "RATE_LIMIT_EXCEEDED"
+                    | "TOO_MANY_REQUESTS"
                     | "SANDBOX_TIMEOUT"
                     | "SANDBOX_OUTPUT_LIMIT"
                     | "OUTPUT_LIMIT_EXCEEDED"
@@ -717,6 +718,7 @@ pub fn pretty_print_benchmark_response_v2(response: impl Read, parameters: &Para
                     | "TIME_LIMIT_EXCEEDED"
                     | "MEMORY_LIMIT_EXCEEDED"
                     | "RATE_LIMIT_EXCEEDED"
+                    | "TOO_MANY_REQUESTS"
                     | "SANDBOX_TIMEOUT"
                     | "SANDBOX_OUTPUT_LIMIT"
                     | "OUTPUT_LIMIT_EXCEEDED"
@@ -1274,6 +1276,7 @@ pub fn pretty_print_submit_response(response: impl Read) {
     let mut total_benchmarks: u64 = 0;
     let mut benchmark_results = vec![];
     let mut completed = 0;
+    let mut finished = false;
 
     for line in reader.lines().flatten() {
         spinner.tick();
@@ -1392,6 +1395,7 @@ pub fn pretty_print_submit_response(response: impl Read) {
             }
 
             Some("ACCEPTED") => {
+                finished = true;
                 if let Some(pb) = progress_bar.take() {
                     pb.finish_and_clear();
                 }
@@ -1454,6 +1458,7 @@ pub fn pretty_print_submit_response(response: impl Read) {
             }
 
             Some("WRONG_ANSWER") => {
+                finished = true;
                 if let Some(pb) = progress_bar.take() {
                     pb.finish_and_clear();
                 }
@@ -1559,6 +1564,7 @@ pub fn pretty_print_submit_response(response: impl Read) {
             }
 
             Some("ERROR") => {
+                finished = true;
                 if let Some(pb) = progress_bar.take() {
                     pb.finish_and_clear();
                 }
@@ -1575,6 +1581,7 @@ pub fn pretty_print_submit_response(response: impl Read) {
             }
 
             Some("COMPILE_ERROR") => {
+                finished = true;
                 if let Some(pb) = progress_bar.take() {
                     pb.finish_and_clear();
                 }
@@ -1588,9 +1595,49 @@ pub fn pretty_print_submit_response(response: impl Read) {
                 break;
             }
 
+            Some(
+                "RUNTIME_ERROR"
+                | "RATE_LIMIT_EXCEEDED"
+                | "TOO_MANY_REQUESTS"
+                | "TIME_LIMIT_EXCEEDED"
+                | "MEMORY_LIMIT_EXCEEDED"
+                | "SANDBOX_TIMEOUT"
+                | "SANDBOX_OUTPUT_LIMIT"
+                | "OUTPUT_LIMIT_EXCEEDED",
+            ) => {
+                finished = true;
+                if let Some(pb) = progress_bar.take() {
+                    pb.finish_and_clear();
+                }
+                let event_type = current_event.as_deref().unwrap_or("ERROR");
+                if let Ok(data) = serde_json::from_str::<ErrorData>(json_data) {
+                    let msg = data
+                        .error
+                        .or(data.message)
+                        .unwrap_or_else(|| "Unknown error".to_string());
+                    spinner.abandon_with_message(format!("{event_type}: {msg}"));
+                } else {
+                    spinner.abandon_with_message(format!("{event_type}"));
+                }
+                break;
+            }
+
             Some(_) => {}
             None => {}
         }
+    }
+
+    if !finished {
+        if let Some(pb) = progress_bar.take() {
+            pb.finish_and_clear();
+        }
+        spinner.finish_and_clear();
+        println!(
+            "{}",
+            style("No response received from server.")
+                .red()
+                .bold()
+        );
     }
 }
 
